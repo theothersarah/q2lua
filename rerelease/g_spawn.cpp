@@ -217,6 +217,10 @@ void SP_info_ctf_teleport_destination(edict_t *self);
 
 void SP_monster_shambler(edict_t* self);
 
+// Sarah
+void SP_func_script(edict_t* self);
+void SP_func_button_scripted(edict_t* self);
+
 // clang-format off
 static const std::initializer_list<spawn_t> spawns = {
 	{ "info_player_start", SP_info_player_start },
@@ -433,7 +437,11 @@ static const std::initializer_list<spawn_t> spawns = {
 	{ "info_player_team2", SP_info_player_team2 },
 	// ZOID
 
-	{ "monster_shambler", SP_monster_shambler }
+	{ "monster_shambler", SP_monster_shambler },
+
+	// Sarah
+	{ "func_script", SP_func_script },
+	{ "func_button_scripted", SP_func_button_scripted }
 };
 // clang-format on
 
@@ -780,7 +788,11 @@ static const std::initializer_list<field_t> entity_fields = {
 		}
 	},
 
-	FIELD_AUTO_NAMED("monster_slots", monsterinfo.monster_slots)
+	FIELD_AUTO_NAMED("monster_slots", monsterinfo.monster_slots),
+
+	// Sarah
+	FIELD_AUTO(script_function),
+	FIELD_AUTO(script_arg),
 };
 
 #undef AUTO_LOADER_FUNC
@@ -1142,6 +1154,8 @@ Creates a server's entity / program execution context by
 parsing textual entity definitions out of an ent file.
 ==============
 */
+void script_load(const char* mapname);
+
 void SpawnEntities(const char *mapname, const char *entities, const char *spawnpoint)
 {
 	// clear cached indices
@@ -1272,6 +1286,9 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	// ROGUE
 
 	setup_shadow_lights();
+
+	// Load script
+	script_load(mapname);
 }
 
 //===================================================================

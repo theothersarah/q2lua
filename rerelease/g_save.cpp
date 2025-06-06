@@ -1303,6 +1303,10 @@ SAVE_STRUCT_START
 	FIELD_AUTO( lastMOD.id ),
 	FIELD_AUTO( lastMOD.friendly_fire ),
 
+	// Sarah
+	FIELD_LEVEL_STRING(script_function),
+	FIELD_AUTO(script_arg),
+
 SAVE_STRUCT_END
 #undef DECLARE_SAVE_STRUCT
 // clang-format on
@@ -2462,6 +2466,9 @@ void ReadGameJson(const char *jsonString)
 	G_PrecacheInventoryItems();
 }
 
+// Sarah: get script global variables for save and load
+std::unordered_map<std::string, int64_t>* script_get_variables();
+
 // new entry point for WriteLevel.
 // returns pointer to TagMalloc'd JSON string.
 char *WriteLevelJson(bool transition, size_t *out_size)
@@ -2502,6 +2509,19 @@ char *WriteLevelJson(bool transition, size_t *out_size)
 	}
 
 	json["entities"] = std::move(entities);
+
+	// Sarah: add script global variables
+	auto script_variables = script_get_variables();
+
+	Json::Value variables(Json::objectValue);
+
+	for (auto it = script_variables->begin(); it != script_variables->end(); ++it)
+	{
+		auto value = Json::Value(it->second);
+		variables[it->first.c_str()] = value;
+	}
+
+	json["script_variables"] = std::move(variables);
 
 	return saveJson(json, out_size);
 }
@@ -2574,6 +2594,20 @@ void ReadLevelJson(const char *jsonString)
 			if (strcmp(ent->classname, "target_crosslevel_target") == 0 ||
 				strcmp(ent->classname, "target_crossunit_target") == 0)
 				ent->nextthink = level.time + gtime_t::from_sec(ent->delay);
+	}
+
+	// Sarah: read script variables
+	auto script_variables = script_get_variables();
+
+	const Json::Value& variables = json["script_variables"];
+
+	for (auto it = variables.begin(); it != variables.end(); ++it)
+	{
+		const char* dummy;
+		const char* key = it.memberName(&dummy);
+		const Json::Value& value = *it;
+
+		script_variables->insert_or_assign(key, value.asInt64());
 	}
 
 	G_PrecacheInventoryItems();

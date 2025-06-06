@@ -4,6 +4,8 @@
   "version": "2022",
   "dependencies": [
     "fmt",
-    "jsoncpp"
-  ]
+    "jsoncpp",
+    "lua"
+  ],
+  "builtin-baseline": "3426db05b996481ca31e95fff3734cf23e0f51bc"
 }

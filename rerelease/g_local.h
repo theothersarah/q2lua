@@ -3233,6 +3233,11 @@ struct edict_t
 	mod_t	lastMOD;
 	const char	*style_on, *style_off;
 	uint32_t crosslevel_flags;
+
+	// Sarah
+	const char* script_function;
+	int32_t script_arg;
+
 	// NOTE: if adding new elements, make sure to add them
 	// in g_save.cpp too!
 };

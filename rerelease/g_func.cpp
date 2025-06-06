@@ -2113,6 +2113,9 @@ constexpr spawnflags_t SPAWNFLAG_TRAIN_BLOCK_STOPS = 4_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_TRAIN_FIX_OFFSET = 16_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_TRAIN_USE_ORIGIN = 32_spawnflag;
 
+// Sarah: new spawnflag
+constexpr spawnflags_t SPAWNFLAG_TRAIN_FIX_ACTIVATOR = 64_spawnflag;
+
 /*QUAKED func_train (0 .5 .8) ? START_ON TOGGLE BLOCK_STOPS MOVE_TEAMCHAIN FIX_OFFSET USE_ORIGIN
 Trains are moving platforms that players can ride.
 The targets origin specifies the min point of the train at each corner.
@@ -2157,7 +2160,17 @@ MOVEINFO_ENDFUNC(train_wait) (edict_t *self) -> void
 		ent = self->target_ent;
 		savetarget = ent->target;
 		ent->target = ent->pathtarget;
-		G_UseTargets(ent, self->activator);
+
+		// Sarah: If spawnflag is set, always report the train as the activator even if it was toggled
+		if (self->spawnflags.has(SPAWNFLAG_TRAIN_FIX_ACTIVATOR))
+		{
+			G_UseTargets(ent, self);
+		}
+		else
+		{
+			G_UseTargets(ent, self->activator);
+		}
+
 		ent->target = savetarget;
 
 		// make sure we didn't get killed by a killtarget
@@ -2344,6 +2357,29 @@ void train_resume(edict_t *self)
 	self->moveinfo.end_origin = dest;
 	Move_Calc(self, dest, train_wait);
 	self->spawnflags |= SPAWNFLAG_TRAIN_START_ON;
+
+	// Sarah: Added to make resume respect move teamchain
+	if (self->spawnflags.has(SPAWNFLAG_TRAIN_MOVE_TEAMCHAIN))
+	{
+		edict_t* e;
+		vec3_t	 dir, dst;
+
+		dir = dest - self->s.origin;
+		for (e = self->teamchain; e; e = e->teamchain)
+		{
+			dst = dir + e->s.origin;
+			e->moveinfo.start_origin = e->s.origin;
+			e->moveinfo.end_origin = dst;
+
+			e->moveinfo.state = STATE_TOP;
+			e->speed = self->speed;
+			e->moveinfo.speed = self->moveinfo.speed;
+			e->moveinfo.accel = self->moveinfo.accel;
+			e->moveinfo.decel = self->moveinfo.decel;
+			e->movetype = MOVETYPE_PUSH;
+			Move_Calc(e, dst, train_piece_wait);
+		}
+	}
 }
 
 THINK(func_train_find) (edict_t *self) -> void
@@ -2398,6 +2434,18 @@ USE(train_use) (edict_t *self, edict_t *other, edict_t *activator) -> void
 		self->spawnflags &= ~SPAWNFLAG_TRAIN_START_ON;
 		self->velocity = {};
 		self->nextthink = 0_ms;
+
+		// Sarah: Added to make resume respect move teamchain
+		if (self->spawnflags.has(SPAWNFLAG_TRAIN_MOVE_TEAMCHAIN))
+		{
+			edict_t* e;
+
+			for (e = self->teamchain; e; e = e->teamchain)
+			{
+				e->velocity = {};
+				e->nextthink = 0_ms;
+			}
+		}
 	}
 	else
 	{
