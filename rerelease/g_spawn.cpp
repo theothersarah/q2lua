@@ -220,6 +220,7 @@ void SP_monster_shambler(edict_t* self);
 // Sarah
 void SP_func_script(edict_t* self);
 void SP_func_button_scripted(edict_t* self);
+void SP_trigger_enter_level(edict_t* self);
 
 // clang-format off
 static const std::initializer_list<spawn_t> spawns = {
@@ -441,7 +442,8 @@ static const std::initializer_list<spawn_t> spawns = {
 
 	// Sarah
 	{ "func_script", SP_func_script },
-	{ "func_button_scripted", SP_func_button_scripted }
+	{ "func_button_scripted", SP_func_button_scripted },
+	{ "trigger_enter_level", SP_trigger_enter_level }
 };
 // clang-format on
 

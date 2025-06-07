@@ -43,12 +43,14 @@ static void script_push_string(lua_State* L, const char* str)
 static const char* script_entity_keys[] =
 {
 	"classname",
+	"team",
 	"targetname",
 	"target",
 	"killtarget",
 	"pathtarget",
 	"message",
 	"delay",
+	"count",
 	"script_arg",
 	nullptr
 };
@@ -66,32 +68,43 @@ static int script_entity_get(lua_State* L)
 		break;
 
 	case 1:
-		script_push_string(L, ent->targetname);
+		script_push_string(L, ent->team);
 		break;
 
 	case 2:
-		script_push_string(L, ent->target);
+		script_push_string(L, ent->targetname);
 		break;
 
 	case 3:
-		script_push_string(L, ent->killtarget);
+		script_push_string(L, ent->target);
 		break;
 
 	case 4:
-		script_push_string(L, ent->pathtarget);
+		script_push_string(L, ent->killtarget);
 		break;
 
 	case 5:
-		script_push_string(L, ent->message);
+		script_push_string(L, ent->pathtarget);
 		break;
 
 	case 6:
-		lua_pushinteger(L, ent->delay);
+		script_push_string(L, ent->message);
 		break;
 
 	case 7:
+		lua_pushinteger(L, ent->delay);
+		break;
+
+	case 8:
+		lua_pushinteger(L, ent->count);
+		break;
+
+	case 9:
 		lua_pushinteger(L, ent->script_arg);
 		break;
+
+	default:
+		return luaL_error(L, "if you see this, Sarah fucked up");
 	}
 
 	return 1;
@@ -105,27 +118,31 @@ static int script_entity_set(lua_State* L)
 
 	switch (key)
 	{
-	case 2:
+	case 3:
 		ent->target = script_stringpool_add(luaL_checkstring(L, 3));
 		break;
 
-	case 3:
+	case 4:
 		ent->killtarget = script_stringpool_add(luaL_checkstring(L, 3));
 		break;
 
-	case 4:
+	case 5:
 		ent->pathtarget = script_stringpool_add(luaL_checkstring(L, 3));
 		break;
 
-	case 5:
+	case 6:
 		ent->message = script_stringpool_add(luaL_checkstring(L, 3));
 		break;
 
-	case 6:
+	case 7:
 		ent->delay = luaL_checknumber(L, 3);
 		break;
 
-	case 7:
+	case 8:
+		ent->count = luaL_checkinteger(L, 3);
+		break;
+
+	case 9:
 		ent->script_arg = luaL_checkinteger(L, 3);
 		break;
 
@@ -148,18 +165,65 @@ static void script_push_entity(lua_State* L, edict_t* ent)
 // API functions
 // =============================================================================
 
-// Find all entities with a given targetname
+// Valid entity keys for get and set operations
+static const char* script_find_keys[] =
+{
+	"classname",
+	"team",
+	"targetname",
+	"target",
+	"killtarget",
+	"pathtarget",
+	nullptr
+};
+
+// Find all entities with a given value for a string key (defaulting to targetname)
 static int script_find(lua_State* L)
 {
-	const char* targetname = luaL_checkstring(L, 1);
+	const char* value = luaL_checkstring(L, 1);
+	int key = luaL_checkoption(L, 2, "targetname", script_find_keys);
 
+	// Get a search function for the given key
+	edict_t* (*search_function)(edict_t*, const std::string_view&) = nullptr;
+
+	switch (key)
+	{
+	case 0:
+		search_function = G_FindByString<&edict_t::classname>;
+		break;
+
+	case 1:
+		search_function = G_FindByString<&edict_t::team>;
+		break;
+
+	case 2:
+		search_function = G_FindByString<&edict_t::targetname>;
+		break;
+
+	case 3:
+		search_function = G_FindByString<&edict_t::target>;
+		break;
+
+	case 4:
+		search_function = G_FindByString<&edict_t::killtarget>;
+		break;
+
+	case 5:
+		search_function = G_FindByString<&edict_t::pathtarget>;
+		break;
+
+	default:
+		return luaL_error(L, "if you see this, Sarah fucked up");
+	}
+
+	// Table for results
 	lua_newtable(L);
 
 	int n = 1;
 
 	edict_t* ent = nullptr;
 
-	while ((ent = G_FindByString<&edict_t::targetname>(ent, targetname)))
+	while ((ent = search_function(ent, value)))
 	{
 		script_push_entity(L, ent);
 		lua_seti(L, -2, n++);
@@ -168,19 +232,14 @@ static int script_find(lua_State* L)
 	return 1;
 }
 
-// Trigger a given entity, or all entities with a given targetname
+// Triggers a given entity
 static int script_trigger(lua_State* L)
 {
-	int type = lua_type(L, 1);
-
-	if (type != LUA_TUSERDATA && type != LUA_TSTRING)
-	{
-		return luaL_argerror(L, 1, "type must be entity or string");
-	}
+	edict_t* ent = *(edict_t**)luaL_checkudata(L, 1, "script_entity");
 
 	// Get reference to self and activator from the top of the trigger stack
 	lua_getfield(L, LUA_REGISTRYINDEX, "script_triggerstack");
-	int n = lua_rawlen(L, -1);
+	int n = luaL_len(L, -1);
 	lua_geti(L, -1, n);
 
 	lua_getfield(L, -1, "self");
@@ -192,42 +251,38 @@ static int script_trigger(lua_State* L)
 	lua_pop(L, 4);
 
 	// Trigger it
-	if (type == LUA_TUSERDATA)
+	if (ent == self)
 	{
-		edict_t* ent = *(edict_t**)luaL_checkudata(L, 1, "script_entity");
-
-		if (ent == self)
-		{
-			gi.Com_Print("func_script targeted itself\n");
-		}
-		else
-		{
-			if (ent->use)
-			{
-				ent->use(ent, self, activator);
-			}
-		}
+		return luaL_error(L, "func_script targeted itself");
 	}
 	else
 	{
-		const char* targetname = lua_tostring(L, 1);
-		edict_t* ent = nullptr;
-
-		while ((ent = G_FindByString<&edict_t::targetname>(ent, targetname)))
+		if (ent->use)
 		{
-			if (ent == self)
-			{
-				gi.Com_Print("func_script targeted itself\n");
-			}
-			else
-			{
-				if (ent->use)
-				{
-					ent->use(ent, self, activator);
-				}
-			}
+			ent->use(ent, self, activator);
 		}
 	}
+
+	return 0;
+}
+
+int script_setstring(lua_State* L)
+{
+	edict_t* ent = *(edict_t**)luaL_checkudata(L, 1, "script_entity");
+	const char* str = luaL_checkstring(L, 2);
+
+	// Make sure it's actually a target_string
+	if (Q_strcasecmp(ent->classname, "target_string"))
+	{
+		return luaL_error(L, "entity must be a target_string");
+	}
+
+	// Setting the string to an empty string afterward does two things:
+	// First: it stops problems when str is inevitable garbage collected by Lua
+	// Second: it adds the behavior that triggering the target_string again clears it
+	ent->message = str;
+	ent->use(ent, nullptr, nullptr);
+	ent->message = "";
 
 	return 0;
 }
@@ -277,14 +332,26 @@ static int script_global_set(lua_State* L)
 }
 
 // =============================================================================
-// 
+// Scripting core
 // =============================================================================
 
 // Metafunction __newindex: Allow only string/function pairs to be added
+// Also checks for restricted names
+// Used during startup to ensure that 
 static int script_functionsonly(lua_State* L)
 {
 	luaL_checktype(L, 2, LUA_TSTRING);
 	luaL_checktype(L, 3, LUA_TFUNCTION);
+
+	lua_pushliteral(L, "script");
+
+	if (lua_compare(L, 2, -1, LUA_OPEQ))
+	{
+		return luaL_argerror(L, 2, "name cannot be 'script'");
+	}
+
+	lua_pop(L, 1);
+
 	lua_rawset(L, 1);
 
 	return 0;
@@ -315,7 +382,7 @@ void script_load(const char* mapname)
 
 	if (L == nullptr)
 	{
-		gi.Com_Print("Error initializing scripting engine\n");
+		gi.Com_Print("Error initializing scripting engine: probably out of memory\n");
 		return;
 	}
 
@@ -349,19 +416,6 @@ void script_load(const char* mapname)
 		return;
 	}
 
-	// Make sure there wasn't a function called script
-	lua_getglobal(L, "script");
-
-	if (lua_type(L, -1) != LUA_TNIL)
-	{
-		gi.Com_PrintFmt("User function named 'script' declared in script for map {}\n", mapname);
-		lua_close(L);
-		L = nullptr;
-		return;
-	}
-
-	lua_pop(L, 1);
-
 	// Remove protection on global table so the API can be added to it
 	lua_geti(L, LUA_REGISTRYINDEX, LUA_RIDX_GLOBALS);
 	lua_newtable(L);
@@ -378,6 +432,8 @@ void script_load(const char* mapname)
 	lua_setfield(L, -2, "find");
 	lua_pushcfunction(L, script_trigger);
 	lua_setfield(L, -2, "trigger");
+	lua_pushcfunction(L, script_setstring);
+	lua_setfield(L, -2, "setstring");
 
 	// API table for globals
 	lua_newtable(L);
@@ -388,6 +444,28 @@ void script_load(const char* mapname)
 	lua_setfield(L, -2, "__newindex");
 	lua_setmetatable(L, -2);
 	lua_setfield(L, -2, "globals");
+
+	// Standard libraries
+	luaopen_math(L);
+	lua_newtable(L);
+	lua_pushcfunction(L, script_readonly);
+	lua_setfield(L, -2, "__newindex");
+	lua_setmetatable(L, -2);
+	lua_setfield(L, -2, "math");
+
+	luaopen_string(L);
+	lua_newtable(L);
+	lua_pushcfunction(L, script_readonly);
+	lua_setfield(L, -2, "__newindex");
+	lua_setmetatable(L, -2);
+	lua_setfield(L, -2, "string");
+
+	luaopen_table(L);
+	lua_newtable(L);
+	lua_pushcfunction(L, script_readonly);
+	lua_setfield(L, -2, "__newindex");
+	lua_setmetatable(L, -2);
+	lua_setfield(L, -2, "table");
 
 	// Metatable for API
 	lua_newtable(L);
@@ -418,7 +496,7 @@ void script_load(const char* mapname)
 	lua_newtable(L);
 	lua_setfield(L, LUA_REGISTRYINDEX, "script_triggerstack");
 
-	gi.Com_PrintFmt("Loaded script for map {}\n", mapname);
+	gi.Com_PrintFmt("Loaded script for map {} {}\n", mapname, lua_gettop(L));
 }
 
 USE(func_script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
@@ -600,4 +678,24 @@ void SP_func_button_scripted(edict_t* ent)
 	}
 
 	gi.linkentity(ent);
+}
+
+// =============================================================================
+// trigger_enter_level
+// =============================================================================
+
+THINK(trigger_level_enter_think) (edict_t* self) -> void
+{
+	G_UseTargets(self, self);
+}
+
+void SP_trigger_enter_level(edict_t* self)
+{
+	if (!self->delay)
+	{
+		self->delay = 1;
+	}
+
+	self->think = trigger_level_enter_think;
+	self->nextthink = level.time + gtime_t::from_sec(self->delay);
 }

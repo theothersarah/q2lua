@@ -2590,9 +2590,11 @@ void ReadLevelJson(const char *jsonString)
 			continue;
 
 		// fire any cross-level/unit triggers
+		// Sarah: added trigger_enter_level
 		if (ent->classname)
 			if (strcmp(ent->classname, "target_crosslevel_target") == 0 ||
-				strcmp(ent->classname, "target_crossunit_target") == 0)
+				strcmp(ent->classname, "target_crossunit_target") == 0 ||
+				strcmp(ent->classname, "trigger_enter_level") == 0)
 				ent->nextthink = level.time + gtime_t::from_sec(ent->delay);
 	}
 
