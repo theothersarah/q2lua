@@ -2651,6 +2651,18 @@ constexpr spawnflags_t SPAWNFLAG_LANDMARK_KEEP_Z = 1_spawnflag;
 #include "ctf/g_ctf.h"
 #include "ctf/p_ctf_menu.h"
 // ZOID
+
+// Sarah
+// func_script.c
+//
+
+void script_load(const char* mapname);
+
+std::unordered_map<std::string, std::string> script_get_global_variables();
+void script_set_global_variables(std::unordered_map<std::string, std::string> globals);
+
+std::unordered_map<std::string, std::string>* script_get_crosslevel_variables();
+
 //============================================================================
 
 // client_t->anim_priority
@@ -3236,7 +3248,7 @@ struct edict_t
 
 	// Sarah
 	const char* script_function;
-	int32_t script_arg;
+	const char* script_arg;
 
 	// NOTE: if adding new elements, make sure to add them
 	// in g_save.cpp too!

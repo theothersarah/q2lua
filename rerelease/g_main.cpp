@@ -388,6 +388,11 @@ void ShutdownGame()
 
 	gi.FreeTags(TAG_LEVEL);
 	gi.FreeTags(TAG_GAME);
+
+	// Sarah: clear crosslevel variables
+	auto crosslevel_variables = script_get_crosslevel_variables();
+
+	crosslevel_variables->clear();
 }
 
 static void *G_GetExtension(const char *name)

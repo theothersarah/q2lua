@@ -1305,7 +1305,7 @@ SAVE_STRUCT_START
 
 	// Sarah
 	FIELD_LEVEL_STRING(script_function),
-	FIELD_AUTO(script_arg),
+	FIELD_LEVEL_STRING(script_arg),
 
 SAVE_STRUCT_END
 #undef DECLARE_SAVE_STRUCT
@@ -2419,6 +2419,19 @@ char *WriteGameJson(bool autosave, size_t *out_size)
 	}
 	json["clients"] = std::move(clients);
 
+	// Sarah: write crosslevel variables
+	auto crosslevel_variables = script_get_crosslevel_variables();
+
+	Json::Value crosslevel_variables_json(Json::objectValue);
+
+	for (auto it = crosslevel_variables->begin(); it != crosslevel_variables->end(); ++it)
+	{
+		auto value = Json::Value(it->second);
+		crosslevel_variables_json[it->first] = value;
+	}
+
+	json["script_crosslevel_variables"] = std::move(crosslevel_variables_json);
+
 	return saveJson(json, out_size);
 }
 
@@ -2463,11 +2476,22 @@ void ReadGameJson(const char *jsonString)
 		json_pop_stack();
 	}
 
+	// Sarah: read crosslevel variables
+	auto crosslevel_variables = script_get_crosslevel_variables();
+
+	const Json::Value& crosslevel_variables_json = json["script_crosslevel_variables"];
+
+	for (auto it = crosslevel_variables_json.begin(); it != crosslevel_variables_json.end(); ++it)
+	{
+		const char* dummy;
+		const char* key = it.memberName(&dummy);
+		const Json::Value& value = *it;
+
+		crosslevel_variables->insert_or_assign(key, value.asString());
+	}
+
 	G_PrecacheInventoryItems();
 }
-
-// Sarah: get script global variables for save and load
-std::unordered_map<std::string, int64_t>* script_get_variables();
 
 // new entry point for WriteLevel.
 // returns pointer to TagMalloc'd JSON string.
@@ -2510,18 +2534,18 @@ char *WriteLevelJson(bool transition, size_t *out_size)
 
 	json["entities"] = std::move(entities);
 
-	// Sarah: add script global variables
-	auto script_variables = script_get_variables();
+	// Sarah: write script global variables
+	auto global_variables = script_get_global_variables();
 
-	Json::Value variables(Json::objectValue);
+	Json::Value global_variables_json(Json::objectValue);
 
-	for (auto it = script_variables->begin(); it != script_variables->end(); ++it)
+	for (auto it = global_variables.begin(); it != global_variables.end(); ++it)
 	{
 		auto value = Json::Value(it->second);
-		variables[it->first.c_str()] = value;
+		global_variables_json[it->first] = value;
 	}
 
-	json["script_variables"] = std::move(variables);
+	json["script_global_variables"] = std::move(global_variables_json);
 
 	return saveJson(json, out_size);
 }
@@ -2599,18 +2623,20 @@ void ReadLevelJson(const char *jsonString)
 	}
 
 	// Sarah: read script variables
-	auto script_variables = script_get_variables();
+	std::unordered_map<std::string, std::string> global_variables;
 
-	const Json::Value& variables = json["script_variables"];
+	const Json::Value& global_variables_json = json["script_global_variables"];
 
-	for (auto it = variables.begin(); it != variables.end(); ++it)
+	for (auto it = global_variables_json.begin(); it != global_variables_json.end(); ++it)
 	{
 		const char* dummy;
 		const char* key = it.memberName(&dummy);
 		const Json::Value& value = *it;
 
-		script_variables->insert_or_assign(key, value.asInt64());
+		global_variables.insert_or_assign(key, value.asString());
 	}
+
+	script_set_global_variables(global_variables);
 
 	G_PrecacheInventoryItems();
 

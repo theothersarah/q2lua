@@ -1156,8 +1156,6 @@ Creates a server's entity / program execution context by
 parsing textual entity definitions out of an ent file.
 ==============
 */
-void script_load(const char* mapname);
-
 void SpawnEntities(const char *mapname, const char *entities, const char *spawnpoint)
 {
 	// clear cached indices
@@ -1289,7 +1287,7 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 
 	setup_shadow_lights();
 
-	// Load script
+	// Sarah: load script
 	script_load(mapname);
 }
 

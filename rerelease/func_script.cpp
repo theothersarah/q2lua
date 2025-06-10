@@ -1,7 +1,3 @@
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
-
 #include "g_local.h"
 
 #include <lua.hpp>
@@ -14,11 +10,6 @@ static std::unordered_set<std::string> script_stringpool;
 
 static const char* script_stringpool_add(const char* newstr)
 {
-	if (newstr == nullptr)
-	{
-		return "";
-	}
-
 	return script_stringpool.emplace(newstr).first->c_str();
 }
 
@@ -26,8 +17,25 @@ static const char* script_stringpool_add(const char* newstr)
 // Entity functions
 // =============================================================================
 
+// Valid entity keys for get and set operations
+static const char* script_entity_keys[] =
+{
+	"classname",
+	"team",
+	"targetname",
+	"target",
+	"killtarget",
+	"pathtarget",
+	"script_arg",
+	"message",
+	"delay",
+	"wait",
+	"count",
+	nullptr
+};
+
 // Push a string, or an empty string if the original is null
-static void script_push_string(lua_State* L, const char* str)
+static void script_entity_get_string(lua_State* L, const char* str)
 {
 	if (str == nullptr)
 	{
@@ -39,22 +47,6 @@ static void script_push_string(lua_State* L, const char* str)
 	}
 }
 
-// Valid entity keys for get and set operations
-static const char* script_entity_keys[] =
-{
-	"classname",
-	"team",
-	"targetname",
-	"target",
-	"killtarget",
-	"pathtarget",
-	"message",
-	"delay",
-	"count",
-	"script_arg",
-	nullptr
-};
-
 // Get a value from the entity
 static int script_entity_get(lua_State* L)
 {
@@ -64,43 +56,47 @@ static int script_entity_get(lua_State* L)
 	switch (key)
 	{
 	case 0:
-		script_push_string(L, ent->classname);
+		script_entity_get_string(L, ent->classname);
 		break;
 
 	case 1:
-		script_push_string(L, ent->team);
+		script_entity_get_string(L, ent->team);
 		break;
 
 	case 2:
-		script_push_string(L, ent->targetname);
+		script_entity_get_string(L, ent->targetname);
 		break;
 
 	case 3:
-		script_push_string(L, ent->target);
+		script_entity_get_string(L, ent->target);
 		break;
 
 	case 4:
-		script_push_string(L, ent->killtarget);
+		script_entity_get_string(L, ent->killtarget);
 		break;
 
 	case 5:
-		script_push_string(L, ent->pathtarget);
+		script_entity_get_string(L, ent->pathtarget);
 		break;
 
 	case 6:
-		script_push_string(L, ent->message);
+		script_entity_get_string(L, ent->script_arg);
 		break;
 
 	case 7:
-		lua_pushinteger(L, ent->delay);
+		script_entity_get_string(L, ent->message);
 		break;
 
 	case 8:
-		lua_pushinteger(L, ent->count);
+		lua_pushinteger(L, ent->delay);
 		break;
 
 	case 9:
-		lua_pushinteger(L, ent->script_arg);
+		lua_pushinteger(L, ent->wait);
+		break;
+
+	case 10:
+		lua_pushinteger(L, ent->count);
 		break;
 
 	default:
@@ -108,6 +104,19 @@ static int script_entity_get(lua_State* L)
 	}
 
 	return 1;
+}
+
+// If the string is empty, return null instead
+static const char* script_entity_set_string(const char* str)
+{
+	if (strlen(str) == 0)
+	{
+		return nullptr;
+	}
+	else
+	{
+		return script_stringpool_add(str);
+	}
 }
 
 // Set a value on the entity
@@ -119,36 +128,112 @@ static int script_entity_set(lua_State* L)
 	switch (key)
 	{
 	case 3:
-		ent->target = script_stringpool_add(luaL_checkstring(L, 3));
+		ent->target = script_entity_set_string(luaL_checkstring(L, 3));
 		break;
 
 	case 4:
-		ent->killtarget = script_stringpool_add(luaL_checkstring(L, 3));
+		ent->killtarget = script_entity_set_string(luaL_checkstring(L, 3));
 		break;
 
 	case 5:
-		ent->pathtarget = script_stringpool_add(luaL_checkstring(L, 3));
+		ent->pathtarget = script_entity_set_string(luaL_checkstring(L, 3));
 		break;
 
 	case 6:
-		ent->message = script_stringpool_add(luaL_checkstring(L, 3));
+		ent->script_arg = script_entity_set_string(luaL_checkstring(L, 3));
 		break;
 
 	case 7:
-		ent->delay = luaL_checknumber(L, 3);
+		ent->message = script_entity_set_string(luaL_checkstring(L, 3));
 		break;
 
 	case 8:
-		ent->count = luaL_checkinteger(L, 3);
+		ent->delay = luaL_checknumber(L, 3);
 		break;
 
 	case 9:
-		ent->script_arg = luaL_checkinteger(L, 3);
+		ent->wait = luaL_checknumber(L, 3);
+		break;
+
+	case 10:
+		ent->count = luaL_checkinteger(L, 3);
 		break;
 
 	default:
 		return luaL_error(L, "attempt to set a read-only value");
 	}
+
+	return 0;
+}
+
+// Triggers the entity
+static int script_entity_trigger(lua_State* L)
+{
+	edict_t* ent = *(edict_t**)luaL_checkudata(L, 1, "script_entity");
+
+	// Get reference to self and activator from the top of the trigger stack
+	lua_getfield(L, LUA_REGISTRYINDEX, "script_triggerstack");
+	int n = luaL_len(L, -1);
+	lua_geti(L, -1, n);
+
+	lua_getfield(L, -1, "self");
+	edict_t* self = (edict_t*)lua_touserdata(L, -1);
+
+	lua_getfield(L, -2, "activator");
+	edict_t* activator = (edict_t*)lua_touserdata(L, -1);
+
+	// Also pop the entity off the stack so the stack is empty during the trigger
+	// in case this directly or indirectly triggers another func_script
+	lua_pop(L, 5);
+
+	// Try to prevent an infinite loop
+	if (ent == self)
+	{
+		return luaL_error(L, "func_script targeted itself");
+	}
+
+	// Make sure we didn't killtarget it before
+	if (!ent->inuse)
+	{
+		return luaL_error(L, "entity was killed at some point");
+	}
+
+	// Trigger it
+	if (ent->use)
+	{
+		ent->use(ent, self, activator);
+	}
+	else
+	{
+		return luaL_error(L, "entity has no trigger function");
+	}
+
+	return 0;
+}
+
+int script_entity_setstring(lua_State* L)
+{
+	edict_t* ent = *(edict_t**)luaL_checkudata(L, 1, "script_entity");
+	const char* str = luaL_checkstring(L, 2);
+
+	// Make sure we didn't killtarget it before
+	if (!ent->inuse)
+	{
+		return luaL_error(L, "entity was killed at some point");
+	}
+
+	// Make sure it's actually a target_string
+	if (Q_strcasecmp(ent->classname, "target_string"))
+	{
+		return luaL_error(L, "entity must be a target_string");
+	}
+
+	// Setting the string to an empty string afterward does two things:
+	// First: it stops problems when str is inevitable garbage collected by Lua
+	// Second: it adds the behavior that triggering the target_string again clears it
+	ent->message = str;
+	ent->use(ent, nullptr, nullptr);
+	ent->message = "";
 
 	return 0;
 }
@@ -165,7 +250,7 @@ static void script_push_entity(lua_State* L, edict_t* ent)
 // API functions
 // =============================================================================
 
-// Valid entity keys for get and set operations
+// Valid entity keys for find
 static const char* script_find_keys[] =
 {
 	"classname",
@@ -174,6 +259,7 @@ static const char* script_find_keys[] =
 	"target",
 	"killtarget",
 	"pathtarget",
+	"script_arg",
 	nullptr
 };
 
@@ -212,6 +298,10 @@ static int script_find(lua_State* L)
 		search_function = G_FindByString<&edict_t::pathtarget>;
 		break;
 
+	case 6:
+		search_function = G_FindByString<&edict_t::script_arg>;
+		break;
+
 	default:
 		return luaL_error(L, "if you see this, Sarah fucked up");
 	}
@@ -232,112 +322,108 @@ static int script_find(lua_State* L)
 	return 1;
 }
 
-// Triggers a given entity
-static int script_trigger(lua_State* L)
-{
-	edict_t* ent = *(edict_t**)luaL_checkudata(L, 1, "script_entity");
-
-	// Get reference to self and activator from the top of the trigger stack
-	lua_getfield(L, LUA_REGISTRYINDEX, "script_triggerstack");
-	int n = luaL_len(L, -1);
-	lua_geti(L, -1, n);
-
-	lua_getfield(L, -1, "self");
-	edict_t* self = (edict_t*)lua_touserdata(L, -1);
-
-	lua_getfield(L, -2, "activator");
-	edict_t* activator = (edict_t*)lua_touserdata(L, -1);
-
-	lua_pop(L, 4);
-
-	// Trigger it
-	if (ent == self)
-	{
-		return luaL_error(L, "func_script targeted itself");
-	}
-	else
-	{
-		if (ent->use)
-		{
-			ent->use(ent, self, activator);
-		}
-	}
-
-	return 0;
-}
-
-int script_setstring(lua_State* L)
-{
-	edict_t* ent = *(edict_t**)luaL_checkudata(L, 1, "script_entity");
-	const char* str = luaL_checkstring(L, 2);
-
-	// Make sure it's actually a target_string
-	if (Q_strcasecmp(ent->classname, "target_string"))
-	{
-		return luaL_error(L, "entity must be a target_string");
-	}
-
-	// Setting the string to an empty string afterward does two things:
-	// First: it stops problems when str is inevitable garbage collected by Lua
-	// Second: it adds the behavior that triggering the target_string again clears it
-	ent->message = str;
-	ent->use(ent, nullptr, nullptr);
-	ent->message = "";
-
-	return 0;
-}
-
 // =============================================================================
 // Global variables
 // =============================================================================
 
-// Storage for global variables
-static std::unordered_map<std::string, int64_t> script_variables;
-
-std::unordered_map<std::string, int64_t>* script_get_variables()
-{
-	return &script_variables;
-}
-
-// Get a script global variable, returning 0 if it is undefined
-static int script_global_get(lua_State* L)
-{
-	const char* key = luaL_checkstring(L, 2);
-
-	int64_t val;
-
-	try
-	{
-		val = script_variables.at(key);
-	}
-	catch (const std::out_of_range& oor)
-	{
-		val = 0;
-	}
-
-	lua_pushinteger(L, val);
-
-	return 1;
-}
-
-// Set a script global variable
+// <ake sure key is a string and prevent values of invalid types from being added to the global table
 static int script_global_set(lua_State* L)
 {
-	const char* key = luaL_checkstring(L, 2);
-	int64_t val = luaL_checkinteger(L, 3);
+	luaL_checktype(L, 2, LUA_TSTRING);
+	int type = lua_type(L, 3);
 
-	script_variables.insert_or_assign(key, val);
+	if (type == LUA_TNIL || type == LUA_TNUMBER || type == LUA_TBOOLEAN || type == LUA_TSTRING)
+	{
+		lua_rawset(L, 1);
+	}
+	else
+	{
+		return luaL_argerror(L, 2, "invalid type: must number, boolean, or string");
+	}
 
 	return 0;
 }
 
 // =============================================================================
-// Scripting core
+// Crosslevel variables
+// =============================================================================
+
+// Storage for crosslevel variables
+// This has to be outside of the scripting engine so that it survives entering new levels
+static std::unordered_map<std::string, std::string> script_crosslevel_variables;
+
+// Get a crosslevel variable, returning nil if it hasn't been set
+static int script_crosslevel_get(lua_State* L)
+{
+	const char* key = luaL_checkstring(L, 2);
+
+	std::string str;
+
+	try
+	{
+		str = script_crosslevel_variables.at(key);
+	}
+	catch (const std::out_of_range& oor)
+	{
+		lua_pushnil(L);
+		return 1;
+	}
+
+	size_t loc = str.find_first_of(';');
+	std::string str_type = str.substr(0, loc);
+	std::string str_val = str.substr(loc + 1);
+
+	if (str_type == "number")
+	{
+		lua_stringtonumber(L, str_val.c_str());
+	}
+	else if (str_type == "boolean")
+	{
+		lua_pushboolean(L, str_val == "true");
+	}
+	else
+	{
+		lua_pushstring(L, str_val.c_str());
+	}
+
+	return 1;
+}
+
+// Set a crosslevel variable, ensuring key is a string and the value is of a valid type
+static int script_crosslevel_set(lua_State* L)
+{
+	const char* key = luaL_checkstring(L, 2);
+	int type = lua_type(L, 3);
+
+	if (type == LUA_TNIL)
+	{
+		script_crosslevel_variables.erase(key);
+	}
+	else if (type == LUA_TNUMBER || type == LUA_TBOOLEAN || type == LUA_TSTRING)
+	{
+		std::string val;
+
+		val += lua_typename(L, type);
+		val += ';';
+		val += lua_tostring(L, 3);
+
+		script_crosslevel_variables.insert_or_assign(key, val);
+	}
+	else
+	{
+		return luaL_argerror(L, 2, "invalid type: must number, boolean, or string");
+	}
+
+	return 0;
+}
+
+// =============================================================================
+// Script loading
 // =============================================================================
 
 // Metafunction __newindex: Allow only string/function pairs to be added
 // Also checks for restricted names
-// Used during startup to ensure that 
+// Used during startup to ensure that only functions are added to the global space
 static int script_functionsonly(lua_State* L)
 {
 	luaL_checktype(L, 2, LUA_TSTRING);
@@ -363,7 +449,7 @@ static int script_readonly(lua_State* L)
 	return luaL_error(L, "attempt to set a read-only value");
 }
 
-//
+// Lua state persists for the length of an entire map and is killed and recreated when a new map is loaded
 static lua_State* L = nullptr;
 
 // Load and execute a script for a given map
@@ -371,7 +457,6 @@ void script_load(const char* mapname)
 {
 	// Reset script engine
 	script_stringpool.clear();
-	script_variables.clear();
 
 	if (L != nullptr)
 	{
@@ -399,7 +484,7 @@ void script_load(const char* mapname)
 
 	if (luaL_loadfile(L, G_Fmt("./{}/scripts/{}.lua", gamedir->string, mapname).data()) != LUA_OK)
 	{
-		const char* errstr = luaL_tolstring(L, -1, nullptr);
+		const char* errstr = lua_tostring(L, -1);
 		gi.Com_PrintFmt("Error loading script for map {}: {}\n", mapname, errstr);
 		lua_close(L);
 		L = nullptr;
@@ -409,7 +494,7 @@ void script_load(const char* mapname)
 	// Execute the script
 	if (lua_pcall(L, 0, 0, 0) != LUA_OK)
 	{
-		const char* errstr = luaL_tolstring(L, -1, nullptr);
+		const char* errstr = lua_tostring(L, -1);
 		gi.Com_PrintFmt("Error executing script for map {}: {}\n", mapname, errstr);
 		lua_close(L);
 		L = nullptr;
@@ -430,20 +515,24 @@ void script_load(const char* mapname)
 	// API functions
 	lua_pushcfunction(L, script_find);
 	lua_setfield(L, -2, "find");
-	lua_pushcfunction(L, script_trigger);
-	lua_setfield(L, -2, "trigger");
-	lua_pushcfunction(L, script_setstring);
-	lua_setfield(L, -2, "setstring");
 
 	// API table for globals
 	lua_newtable(L);
 	lua_newtable(L);
-	lua_pushcfunction(L, script_global_get);
-	lua_setfield(L, -2, "__index");
 	lua_pushcfunction(L, script_global_set);
 	lua_setfield(L, -2, "__newindex");
 	lua_setmetatable(L, -2);
 	lua_setfield(L, -2, "globals");
+
+	// API table for crosslevel variables
+	lua_newtable(L);
+	lua_newtable(L);
+	lua_pushcfunction(L, script_crosslevel_get);
+	lua_setfield(L, -2, "__index");
+	lua_pushcfunction(L, script_crosslevel_set);
+	lua_setfield(L, -2, "__newindex");
+	lua_setmetatable(L, -2);
+	lua_setfield(L, -2, "crosslevel");
 
 	// Standard libraries
 	luaopen_math(L);
@@ -486,9 +575,17 @@ void script_load(const char* mapname)
 
 	// Metatable for entity objects
 	luaL_newmetatable(L, "script_entity");
+	lua_newtable(L);
 	lua_pushcfunction(L, script_entity_get);
-	lua_setfield(L, -2, "__index");
+	lua_setfield(L, -2, "get");
 	lua_pushcfunction(L, script_entity_set);
+	lua_setfield(L, -2, "set");
+	lua_pushcfunction(L, script_entity_trigger);
+	lua_setfield(L, -2, "trigger");
+	lua_pushcfunction(L, script_entity_setstring);
+	lua_setfield(L, -2, "setstring");
+	lua_setfield(L, -2, "__index");
+	lua_pushcfunction(L, script_readonly);
 	lua_setfield(L, -2, "__newindex");
 	lua_pop(L, 1);
 
@@ -496,8 +593,102 @@ void script_load(const char* mapname)
 	lua_newtable(L);
 	lua_setfield(L, LUA_REGISTRYINDEX, "script_triggerstack");
 
-	gi.Com_PrintFmt("Loaded script for map {} {}\n", mapname, lua_gettop(L));
+	gi.Com_PrintFmt("Loaded script for map {}\n", mapname);
 }
+
+// =============================================================================
+// Save support
+// =============================================================================
+
+// Get global variables for saving
+std::unordered_map<std::string, std::string> script_get_global_variables()
+{
+	std::unordered_map<std::string, std::string> globals;
+
+	if (L == nullptr)
+	{
+		return globals;
+	}
+
+	// Get the global table
+	lua_getglobal(L, "script");
+	lua_getfield(L, -1, "globals");
+
+	// Walk the table
+	lua_pushnil(L);
+
+	while (lua_next(L, -2) != 0)
+	{
+		// luaL_tolstring puts the converted string on the stack as a new object
+		// There's no need to interact with this copy on the stack, but it stops
+		// the key and value from getting mangled
+		const char* key = luaL_tolstring(L, -2, nullptr);
+
+		std::string val;
+
+		val += lua_typename(L, lua_type(L, -2));
+		val += ';';
+		val += luaL_tolstring(L, -2, nullptr);
+
+		globals.insert_or_assign(key, val);
+
+		lua_pop(L, 3);
+	}
+
+	lua_pop(L, 2);
+
+	return globals;
+}
+
+// Set global variables after loading
+void script_set_global_variables(std::unordered_map<std::string, std::string> globals)
+{
+	if (L == nullptr)
+	{
+		return;
+	}
+
+	lua_getglobal(L, "script");
+	lua_getfield(L, -1, "globals");
+
+	for (auto it = globals.begin(); it != globals.end(); ++it)
+	{
+		std::string key = it->first;
+		std::string str = it->second;
+		size_t loc = str.find_first_of(';');
+		std::string str_type = str.substr(0, loc);
+		std::string str_val = str.substr(loc + 1);
+
+		lua_pushstring(L, key.c_str());
+
+		if (str_type == "number")
+		{
+			lua_stringtonumber(L, str_val.c_str());
+		}
+		else if (str_type == "boolean")
+		{
+			lua_pushboolean(L, str_val == "true");
+		}
+		else
+		{
+			lua_pushstring(L, str_val.c_str());
+		}
+
+		lua_rawset(L, -3);
+	}
+
+	lua_pop(L, 2);
+}
+
+// Get a pointer to the crosslevel variables for clearing, saving, and loading
+std::unordered_map<std::string, std::string>* script_get_crosslevel_variables()
+{
+	return &script_crosslevel_variables;
+}
+
+// =============================================================================
+// func_script entity
+// =============================================================================
 
 USE(func_script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
 {
@@ -550,7 +741,7 @@ USE(func_script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
 
 	if (lua_pcall(L, 3, 0, 0) != LUA_OK)
 	{
-		const char* errstr = luaL_tolstring(L, -1, nullptr);
+		const char* errstr = lua_tostring(L, -1);
 		gi.Com_PrintFmt("Func_script error calling function {}: {}\n", self->script_function, errstr);
 		lua_pop(L, 1);
 	}
@@ -568,7 +759,7 @@ void SP_func_script(edict_t* self)
 }
 
 // =============================================================================
-// func_button_scripted
+// func_button_scripted entity
 // =============================================================================
 
 void button_scripted_touch(edict_t* self, edict_t* other, const trace_t& tr, bool other_touching_self);
@@ -681,7 +872,7 @@ void SP_func_button_scripted(edict_t* ent)
 }
 
 // =============================================================================
-// trigger_enter_level
+// trigger_enter_level entity
 // =============================================================================
 
 THINK(trigger_level_enter_think) (edict_t* self) -> void
