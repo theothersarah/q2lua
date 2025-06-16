@@ -17,7 +17,53 @@ static const char* script_stringpool_add(const char* newstr)
 // Entity functions
 // =============================================================================
 
+// Structure for entity
+// spawn_count is incremented for a given slot whenever the entity in that slot is freed,
+// so this helps us make sure that the reference is still valid or not
+struct script_ud_ent_t
+{
+	edict_t* ent;
+	int32_t spawn_count;
+};
+
+// Check an entity argument for validity and return the entity
+static edict_t* script_check_entity(lua_State* L, int arg, bool error = true)
+{
+	struct script_ud_ent_t* ud = (struct script_ud_ent_t*)luaL_checkudata(L, arg, "script_entity");
+
+	edict_t* ent = ud->ent;
+
+	if (ent->spawn_count != ud->spawn_count)
+	{
+		if (error)
+		{
+			luaL_error(L, "entity reference is no longer valid");
+		}
+
+		return nullptr;
+	}
+
+	return ent;
+}
+
 // Valid entity keys for get and set operations
+enum script_entity_keys_index
+{
+	ENTITY_KEY_CLASSNAME,
+	ENTITY_KEY_TEAM,
+	ENTITY_KEY_TARGETNAME,
+	ENTITY_KEY_TARGET,
+	ENTITY_KEY_KILLTARGET,
+	ENTITY_KEY_PATHTARGET,
+	ENTITY_KEY_SCRIPT_ARG,
+	ENTITY_KEY_MESSAGE,
+	ENTITY_KEY_DELAY,
+	ENTITY_KEY_WAIT,
+	ENTITY_KEY_SPEED,
+	ENTITY_KEY_COUNT
+
+};
+
 static const char* script_entity_keys[] =
 {
 	"classname",
@@ -30,6 +76,7 @@ static const char* script_entity_keys[] =
 	"message",
 	"delay",
 	"wait",
+	"speed",
 	"count",
 	nullptr
 };
@@ -50,52 +97,56 @@ static void script_entity_get_string(lua_State* L, const char* str)
 // Get a value from the entity
 static int script_entity_get(lua_State* L)
 {
-	edict_t* ent = *(edict_t**)luaL_checkudata(L, 1, "script_entity");
+	edict_t* ent = script_check_entity(L, 1);
 	int key = luaL_checkoption(L, 2, nullptr, script_entity_keys);
 
 	switch (key)
 	{
-	case 0:
+	case ENTITY_KEY_CLASSNAME:
 		script_entity_get_string(L, ent->classname);
 		break;
 
-	case 1:
+	case ENTITY_KEY_TEAM:
 		script_entity_get_string(L, ent->team);
 		break;
 
-	case 2:
+	case ENTITY_KEY_TARGETNAME:
 		script_entity_get_string(L, ent->targetname);
 		break;
 
-	case 3:
+	case ENTITY_KEY_TARGET:
 		script_entity_get_string(L, ent->target);
 		break;
 
-	case 4:
+	case ENTITY_KEY_KILLTARGET:
 		script_entity_get_string(L, ent->killtarget);
 		break;
 
-	case 5:
+	case ENTITY_KEY_PATHTARGET:
 		script_entity_get_string(L, ent->pathtarget);
 		break;
 
-	case 6:
+	case ENTITY_KEY_SCRIPT_ARG:
 		script_entity_get_string(L, ent->script_arg);
 		break;
 
-	case 7:
+	case ENTITY_KEY_MESSAGE:
 		script_entity_get_string(L, ent->message);
 		break;
 
-	case 8:
-		lua_pushinteger(L, ent->delay);
+	case ENTITY_KEY_DELAY:
+		lua_pushnumber(L, ent->delay);
 		break;
 
-	case 9:
-		lua_pushinteger(L, ent->wait);
+	case ENTITY_KEY_WAIT:
+		lua_pushnumber(L, ent->wait);
 		break;
 
-	case 10:
+	case ENTITY_KEY_SPEED:
+		lua_pushnumber(L, ent->speed);
+		break;
+
+	case ENTITY_KEY_COUNT:
 		lua_pushinteger(L, ent->count);
 		break;
 
@@ -122,40 +173,44 @@ static const char* script_entity_set_string(const char* str)
 // Set a value on the entity
 static int script_entity_set(lua_State* L)
 {
-	edict_t* ent = *(edict_t**)luaL_checkudata(L, 1, "script_entity");
+	edict_t* ent = script_check_entity(L, 1);
 	int key = luaL_checkoption(L, 2, nullptr, script_entity_keys);
 
 	switch (key)
 	{
-	case 3:
+	case ENTITY_KEY_TARGET:
 		ent->target = script_entity_set_string(luaL_checkstring(L, 3));
 		break;
 
-	case 4:
+	case ENTITY_KEY_KILLTARGET:
 		ent->killtarget = script_entity_set_string(luaL_checkstring(L, 3));
 		break;
 
-	case 5:
+	case ENTITY_KEY_PATHTARGET:
 		ent->pathtarget = script_entity_set_string(luaL_checkstring(L, 3));
 		break;
 
-	case 6:
+	case ENTITY_KEY_SCRIPT_ARG:
 		ent->script_arg = script_entity_set_string(luaL_checkstring(L, 3));
 		break;
 
-	case 7:
+	case ENTITY_KEY_MESSAGE:
 		ent->message = script_entity_set_string(luaL_checkstring(L, 3));
 		break;
 
-	case 8:
+	case ENTITY_KEY_DELAY:
 		ent->delay = luaL_checknumber(L, 3);
 		break;
 
-	case 9:
+	case ENTITY_KEY_WAIT:
 		ent->wait = luaL_checknumber(L, 3);
 		break;
 
-	case 10:
+	case ENTITY_KEY_SPEED:
+		ent->speed = luaL_checknumber(L, 3);
+		break;
+
+	case ENTITY_KEY_COUNT:
 		ent->count = luaL_checkinteger(L, 3);
 		break;
 
@@ -166,10 +221,41 @@ static int script_entity_set(lua_State* L)
 	return 0;
 }
 
+// Function for delayed trigger
+THINK(script_entity_trigger_delay) (edict_t* self) -> void
+{
+	edict_t* ent = self->target_ent;
+
+	if (ent->spawn_count != self->count)
+	{
+		gi.Com_Print("func_script delayed trigger target no longer exists\n");
+	}
+	else if (ent->use)
+	{
+		ent->use(ent, self, self->activator);
+	}
+	else
+	{
+		gi.Com_Print("func_script delayed trigger target has no use function\n");
+	}
+
+	G_FreeEdict(self);
+}
+
 // Triggers the entity
 static int script_entity_trigger(lua_State* L)
 {
-	edict_t* ent = *(edict_t**)luaL_checkudata(L, 1, "script_entity");
+	edict_t* ent = script_check_entity(L, 1);
+
+	int nargs = lua_gettop(L);
+
+	// Second argument is an optional delay
+	float delay = -1;
+
+	if (nargs > 1)
+	{
+		delay = luaL_checknumber(L, 2);
+	}
 
 	// Get reference to self and activator from the top of the trigger stack
 	lua_getfield(L, LUA_REGISTRYINDEX, "script_triggerstack");
@@ -182,45 +268,51 @@ static int script_entity_trigger(lua_State* L)
 	lua_getfield(L, -2, "activator");
 	edict_t* activator = (edict_t*)lua_touserdata(L, -1);
 
-	// Also pop the entity off the stack so the stack is empty during the trigger
+	// Also pop the arguments off the stack so the stack is empty during the trigger
 	// in case this directly or indirectly triggers another func_script
-	lua_pop(L, 5);
+	lua_pop(L, 4 + nargs);
 
-	// Try to prevent an infinite loop
-	if (ent == self)
+	if (delay > 0)
 	{
-		return luaL_error(L, "func_script targeted itself");
-	}
+		// Spawn a temporary entity to trigger it later
+		edict_t* t = G_Spawn();
+		t->classname = "DelayedUse";
+		t->nextthink = level.time + gtime_t::from_sec(delay);
+		t->think = script_entity_trigger_delay;
+		t->activator = activator;
+		t->target_ent = ent;
+		t->count = ent->spawn_count;
+		t->script_arg = ent->script_arg;
 
-	// Make sure we didn't killtarget it before
-	if (!ent->inuse)
-	{
-		return luaL_error(L, "entity was killed at some point");
-	}
-
-	// Trigger it
-	if (ent->use)
-	{
-		ent->use(ent, self, activator);
+		return 0;
 	}
 	else
 	{
-		return luaL_error(L, "entity has no trigger function");
+		// Try to prevent an infinite loop
+		if (ent == self)
+		{
+			return luaL_error(L, "func_script triggered itself with no delay");
+		}
+
+		// Trigger it
+		if (ent->use)
+		{
+			ent->use(ent, self, activator);
+		}
+		else
+		{
+			return luaL_error(L, "entity has no trigger function");
+		}
 	}
 
 	return 0;
 }
 
+// Special function for target_strings - set the displayed string without adding the value to the string pool
 int script_entity_setstring(lua_State* L)
 {
-	edict_t* ent = *(edict_t**)luaL_checkudata(L, 1, "script_entity");
+	edict_t* ent = script_check_entity(L, 1);
 	const char* str = luaL_checkstring(L, 2);
-
-	// Make sure we didn't killtarget it before
-	if (!ent->inuse)
-	{
-		return luaL_error(L, "entity was killed at some point");
-	}
 
 	// Make sure it's actually a target_string
 	if (Q_strcasecmp(ent->classname, "target_string"))
@@ -238,11 +330,38 @@ int script_entity_setstring(lua_State* L)
 	return 0;
 }
 
+// Return true if an entity reference is still valid, or false if it has gone stale
+int script_entity_valid(lua_State* L)
+{
+	edict_t* ent = script_check_entity(L, 1, false);
+
+	if (ent != nullptr)
+	{
+		lua_pushboolean(L, 1);
+	}
+	else
+	{
+		lua_pushboolean(L, 0);
+	}
+
+	return 1;
+}
+
 // Creates an entity object at the top of the stack
 static void script_push_entity(lua_State* L, edict_t* ent)
 {
-	edict_t** userdata = (edict_t**)lua_newuserdata(L, sizeof(edict_t*));
-	*userdata = ent;
+	struct script_ud_ent_t* ud = (struct script_ud_ent_t*)lua_newuserdata(L, sizeof(struct script_ud_ent_t*));
+
+	ud->ent = ent;
+	ud->spawn_count = ent->spawn_count;
+
+	// If the entity pointer points to an empty slot, make sure it counts as an invalid reference even if the slot is filled later
+	// This should only happen if the part of the trigger chain has been killtargeted before triggering a function
+	if (!ent->inuse)
+	{
+		ud->spawn_count--;
+	}
+
 	luaL_setmetatable(L, "script_entity");
 }
 
@@ -250,60 +369,47 @@ static void script_push_entity(lua_State* L, edict_t* ent)
 // API functions
 // =============================================================================
 
-// Valid entity keys for find
-static const char* script_find_keys[] =
-{
-	"classname",
-	"team",
-	"targetname",
-	"target",
-	"killtarget",
-	"pathtarget",
-	"script_arg",
-	nullptr
-};
-
 // Find all entities with a given value for a string key (defaulting to targetname)
 static int script_find(lua_State* L)
 {
 	const char* value = luaL_checkstring(L, 1);
-	int key = luaL_checkoption(L, 2, "targetname", script_find_keys);
+	int key = luaL_checkoption(L, 2, "targetname", script_entity_keys);
 
 	// Get a search function for the given key
 	edict_t* (*search_function)(edict_t*, const std::string_view&) = nullptr;
 
 	switch (key)
 	{
-	case 0:
+	case ENTITY_KEY_CLASSNAME:
 		search_function = G_FindByString<&edict_t::classname>;
 		break;
 
-	case 1:
+	case ENTITY_KEY_TEAM:
 		search_function = G_FindByString<&edict_t::team>;
 		break;
 
-	case 2:
+	case ENTITY_KEY_TARGETNAME:
 		search_function = G_FindByString<&edict_t::targetname>;
 		break;
 
-	case 3:
+	case ENTITY_KEY_TARGET:
 		search_function = G_FindByString<&edict_t::target>;
 		break;
 
-	case 4:
+	case ENTITY_KEY_KILLTARGET:
 		search_function = G_FindByString<&edict_t::killtarget>;
 		break;
 
-	case 5:
+	case ENTITY_KEY_PATHTARGET:
 		search_function = G_FindByString<&edict_t::pathtarget>;
 		break;
 
-	case 6:
+	case ENTITY_KEY_SCRIPT_ARG:
 		search_function = G_FindByString<&edict_t::script_arg>;
 		break;
 
 	default:
-		return luaL_error(L, "if you see this, Sarah fucked up");
+		return luaL_error(L, "attempt to search by non-string key");
 	}
 
 	// Table for results
@@ -332,13 +438,13 @@ static int script_global_set(lua_State* L)
 	luaL_checktype(L, 2, LUA_TSTRING);
 	int type = lua_type(L, 3);
 
-	if (type == LUA_TNIL || type == LUA_TNUMBER || type == LUA_TBOOLEAN || type == LUA_TSTRING)
+	if (type == LUA_TNIL || type == LUA_TNUMBER || type == LUA_TBOOLEAN || type == LUA_TSTRING || type == LUA_TUSERDATA)
 	{
 		lua_rawset(L, 1);
 	}
 	else
 	{
-		return luaL_argerror(L, 2, "invalid type: must number, boolean, or string");
+		return luaL_argerror(L, 2, "invalid type: must be nil, number, boolean, string, or entity");
 	}
 
 	return 0;
@@ -369,7 +475,7 @@ static int script_crosslevel_get(lua_State* L)
 		return 1;
 	}
 
-	size_t loc = str.find_first_of(';');
+	size_t loc = str.find_first_of(':');
 	std::string str_type = str.substr(0, loc);
 	std::string str_val = str.substr(loc + 1);
 
@@ -404,7 +510,7 @@ static int script_crosslevel_set(lua_State* L)
 		std::string val;
 
 		val += lua_typename(L, type);
-		val += ';';
+		val += ':';
 		val += lua_tostring(L, 3);
 
 		script_crosslevel_variables.insert_or_assign(key, val);
@@ -584,6 +690,8 @@ void script_load(const char* mapname)
 	lua_setfield(L, -2, "trigger");
 	lua_pushcfunction(L, script_entity_setstring);
 	lua_setfield(L, -2, "setstring");
+	lua_pushcfunction(L, script_entity_valid);
+	lua_setfield(L, -2, "valid");
 	lua_setfield(L, -2, "__index");
 	lua_pushcfunction(L, script_readonly);
 	lua_setfield(L, -2, "__newindex");
@@ -626,13 +734,34 @@ std::unordered_map<std::string, std::string> script_get_global_variables()
 
 		std::string val;
 
-		val += lua_typename(L, lua_type(L, -2));
-		val += ';';
-		val += luaL_tolstring(L, -2, nullptr);
+		int type = lua_type(L, -2);
+
+		if (type == LUA_TUSERDATA)
+		{
+			val += "entity:";
+
+			struct script_ud_ent_t* ud = (script_ud_ent_t*)lua_touserdata(L, -2);
+
+			if (!ud->ent->inuse || ud->ent->spawn_count != ud->spawn_count)
+			{
+				val += "-1";
+			}
+			else
+			{
+				val += std::to_string(ud->ent - g_edicts);
+			}
+		}
+		else
+		{
+			val += lua_typename(L, type);
+			val += ':';
+			val += luaL_tolstring(L, -2, nullptr);
+			lua_pop(L, 1);
+		}
 
 		globals.insert_or_assign(key, val);
 
-		lua_pop(L, 3);
+		lua_pop(L, 2);
 	}
 
 	lua_pop(L, 2);
@@ -655,7 +784,7 @@ void script_set_global_variables(std::unordered_map<std::string, std::string> gl
 	{
 		std::string key = it->first;
 		std::string str = it->second;
-		size_t loc = str.find_first_of(';');
+		size_t loc = str.find_first_of(':');
 		std::string str_type = str.substr(0, loc);
 		std::string str_val = str.substr(loc + 1);
 
@@ -668,6 +797,27 @@ void script_set_global_variables(std::unordered_map<std::string, std::string> gl
 		else if (str_type == "boolean")
 		{
 			lua_pushboolean(L, str_val == "true");
+		}
+		else if (str_type == "entity")
+		{
+			int32_t n = std::stoi(str_val);
+
+			if (n < 0)
+			{
+				// Invalid entities are referenced to worldspawn but with a spawn_count of -1
+				// Since worldspawn's slot is never recycled, let alone over 4 billion times,
+				// this should be completely safe
+				struct script_ud_ent_t* ud = (struct script_ud_ent_t*)lua_newuserdata(L, sizeof(struct script_ud_ent_t*));
+
+				ud->ent = g_edicts;
+				ud->spawn_count = -1;
+
+				luaL_setmetatable(L, "script_entity");
+			}
+			else
+			{
+				script_push_entity(L, g_edicts + n);
+			}
 		}
 		else
 		{
@@ -724,9 +874,6 @@ USE(func_script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
 
 	lua_pushlightuserdata(L, self);
 	lua_setfield(L, -2, "self");
-
-	lua_pushlightuserdata(L, other);
-	lua_setfield(L, -2, "other");
 
 	lua_pushlightuserdata(L, activator);
 	lua_setfield(L, -2, "activator");

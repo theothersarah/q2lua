@@ -2358,7 +2358,7 @@ void train_resume(edict_t *self)
 	Move_Calc(self, dest, train_wait);
 	self->spawnflags |= SPAWNFLAG_TRAIN_START_ON;
 
-	// Sarah: Added to make resume respect move teamchain
+	// Sarah: Added to make toggle respect move teamchain
 	if (self->spawnflags.has(SPAWNFLAG_TRAIN_MOVE_TEAMCHAIN))
 	{
 		edict_t* e;
@@ -2435,7 +2435,7 @@ USE(train_use) (edict_t *self, edict_t *other, edict_t *activator) -> void
 		self->velocity = {};
 		self->nextthink = 0_ms;
 
-		// Sarah: Added to make resume respect move teamchain
+		// Sarah: Added to make toggle respect move teamchain
 		if (self->spawnflags.has(SPAWNFLAG_TRAIN_MOVE_TEAMCHAIN))
 		{
 			edict_t* e;
