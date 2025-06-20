@@ -293,9 +293,6 @@ Pathtarget: gets used when an entity that has
 	this path_corner targeted touches it
 */
 
-// Sarah: New spawnflags
-constexpr spawnflags_t SPAWNFLAG_PATH_CORNER_TRACK = 2_spawnflag;
-
 TOUCH(path_corner_touch) (edict_t *self, edict_t *other, const trace_t &tr, bool other_touching_self) -> void
 {
 	vec3_t	 v;
@@ -370,12 +367,6 @@ void SP_path_corner(edict_t *self)
 	{
 		gi.Com_PrintFmt("{} with no targetname\n", *self);
 		G_FreeEdict(self);
-		return;
-	}
-
-	// Sarah: if this spawnflag is set, do not add collision to it
-	if (self->spawnflags.has(SPAWNFLAG_PATH_CORNER_TRACK))
-	{
 		return;
 	}
 

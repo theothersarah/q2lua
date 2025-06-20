@@ -589,6 +589,7 @@ speed	default is 1000
 
 constexpr spawnflags_t SPAWNFLAG_BLASTER_NOTRAIL = 1_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_BLASTER_NOEFFECTS = 2_spawnflag;
+constexpr spawnflags_t SPAWNFLAG_BLASTER_SILENT = 4_spawnflag;
 
 USE(use_target_blaster) (edict_t *self, edict_t *other, edict_t *activator) -> void
 {
@@ -601,8 +602,37 @@ USE(use_target_blaster) (edict_t *self, edict_t *other, edict_t *activator) -> v
 	else
 		effect = EF_BLASTER;
 
-	fire_blaster(self, self->s.origin, self->movedir, self->dmg, (int) self->speed, effect, MOD_TARGET_BLASTER);
-	gi.sound(self, CHAN_VOICE, self->noise_index, 1, ATTN_NORM, 0);
+	if (self->enemy && self->count == self->enemy->spawn_count)
+	{
+		vec3_t dir = self->enemy->s.origin - self->s.origin;
+		dir.normalize();
+
+		fire_blaster(self, self->s.origin, dir, self->dmg, (int)self->speed, effect, MOD_TARGET_BLASTER);
+	}
+	else
+	{
+		fire_blaster(self, self->s.origin, self->movedir, self->dmg, (int)self->speed, effect, MOD_TARGET_BLASTER);
+	}
+
+	if (!self->spawnflags.has(SPAWNFLAG_BLASTER_SILENT))
+	{
+		gi.sound(self, CHAN_VOICE, self->noise_index, 1, ATTN_NORM, 0);
+	}
+}
+
+THINK(blaster_find_target) (edict_t* self) -> void
+{
+	edict_t* ent = G_FindByString<&edict_t::targetname>(nullptr, self->target);
+
+	if (!ent)
+	{
+		gi.Com_PrintFmt("{}: {} is a bad target\n", *self, self->target);
+	}
+	else
+	{
+		self->count = ent->spawn_count;
+		self->enemy = ent;
+	}
 }
 
 void SP_target_blaster(edict_t *self)
@@ -615,6 +645,12 @@ void SP_target_blaster(edict_t *self)
 		self->dmg = 15;
 	if (!self->speed)
 		self->speed = 1000;
+
+	if (self->target)
+	{
+		self->think = blaster_find_target;
+		self->nextthink = level.time + FRAME_TIME_S;
+	}
 
 	self->svflags = SVF_NOCLIENT;
 }

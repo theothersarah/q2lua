@@ -1037,3 +1037,20 @@ void SP_trigger_enter_level(edict_t* self)
 	self->think = trigger_level_enter_think;
 	self->nextthink = level.time + gtime_t::from_sec(self->delay);
 }
+
+// =============================================================================
+// path_track entity
+// =============================================================================
+
+// Spawnflags:
+// 1 - Teleport
+
+void SP_path_track(edict_t* self)
+{
+	if (!self->targetname)
+	{
+		gi.Com_PrintFmt("{} with no targetname\n", *self);
+		G_FreeEdict(self);
+		return;
+	}
+}

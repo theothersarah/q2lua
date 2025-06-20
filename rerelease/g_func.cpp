@@ -48,6 +48,9 @@ constexpr spawnflags_t SPAWNFLAG_DOOR_ROTATING_Y_AXIS = 128_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_DOOR_ROTATING_INACTIVE = 0x10000_spawnflag; // Paril: moved to non-reserved
 constexpr spawnflags_t SPAWNFLAG_DOOR_ROTATING_SAFE_OPEN = 0x20000_spawnflag;
 
+// Sarah
+constexpr spawnflags_t SPAWNFLAG_DOOR_UNLOCKABLE = 0x40000_spawnflag;
+
 // support routine for setting moveinfo sounds
 inline int32_t G_GetMoveinfoSoundIndex(edict_t *self, const char *default_value, const char *wanted_value)
 {
@@ -1515,6 +1518,16 @@ USE(door_use) (edict_t *self, edict_t *other, edict_t *activator) -> void
 	}
 	// PGM
 
+	// Sarah: if it has a pathtarget and is unlockable, clear the pathtarget
+	// this makes the trigger box open it normally instead of triggering things
+	if (self->pathtarget && self->spawnflags.has(SPAWNFLAG_DOOR_UNLOCKABLE))
+	{
+		for (ent = self; ent; ent = ent->teamchain)
+		{
+			ent->pathtarget = nullptr;
+		}
+	}
+
 	// trigger all paired doors
 	for (ent = self; ent; ent = ent->teamchain)
 	{
@@ -1539,7 +1552,66 @@ TOUCH(Touch_DoorTrigger) (edict_t *self, edict_t *other, const trace_t &tr, bool
 		return;
 	self->touch_debounce_time = level.time + 1_sec;
 
-	door_use(self->owner, other, other);
+	// Sarah: if pathtarget is set, trigger entities with that targetname instead of opening
+	// this checks the owner's pathtarget, so if it's later cleared, the trigger just opens the door normally
+	if (self->owner->pathtarget)
+	{
+		edict_t* t = nullptr;
+		while ((t = G_FindByString<&edict_t::targetname>(t, self->pathtarget)))
+		{
+			if (t->use)
+			{
+				t->use(t, self, other);
+			}
+		}
+	}
+	else
+	{
+		door_use(self->owner, other, other);
+	}
+}
+
+// Sarah: if unlockable door is targeted, it spawns a trigger for opening it
+USE(Use_DoorUnlockable) (edict_t* self, edict_t* other, edict_t* activator) -> void
+{
+	if (self->flags & FL_TEAMSLAVE)
+	{
+		return;
+	}
+
+	edict_t* ent;
+
+	vec3_t mins = self->absmin;
+	vec3_t maxs = self->absmax;
+
+	for (ent = self->teamchain; ent; ent = ent->teamchain)
+	{
+		AddPointToBounds(ent->absmin, mins, maxs);
+		AddPointToBounds(ent->absmax, mins, maxs);
+	}
+
+	mins[0] -= 60;
+	mins[1] -= 60;
+	maxs[0] += 60;
+	maxs[1] += 60;
+
+	ent = G_Spawn();
+	ent->classname = "DoorTrigger";
+	ent->mins = mins;
+	ent->maxs = maxs;
+	ent->owner = self;
+	ent->solid = SOLID_TRIGGER;
+	ent->movetype = MOVETYPE_NONE;
+	ent->touch = Touch_DoorTrigger;
+	gi.linkentity(ent);
+
+	// Clear the door's touch and use stuff, so it will work like a normal door from now on
+	for (ent = self; ent; ent = ent->teamchain)
+	{
+		ent->message = nullptr;
+		ent->touch = nullptr;
+		ent->use = nullptr;
+	}
 }
 
 THINK(Think_CalcMoveSpeed) (edict_t *self) -> void
@@ -1582,6 +1654,14 @@ THINK(Think_CalcMoveSpeed) (edict_t *self) -> void
 	}
 }
 
+// Sarah: if door trigger box is triggered, open the door
+// this should only be possible if the door has a pathtarget targeting a func_script,
+// which then does something like other:trigger()
+USE(Use_DoorTrigger) (edict_t* self, edict_t* other, edict_t* activator) -> void
+{
+	door_use(self->owner, other, activator);
+}
+
 THINK(Think_SpawnDoorTrigger) (edict_t *ent) -> void
 {
 	edict_t *other;
@@ -1606,6 +1686,13 @@ THINK(Think_SpawnDoorTrigger) (edict_t *ent) -> void
 	maxs[1] += 60;
 
 	other = G_Spawn();
+
+	// Sarah: add stuff relevant for pathtarget functionality
+	other->classname = "DoorTrigger";
+	other->pathtarget = ent->pathtarget;
+	other->script_arg = ent->script_arg;
+	other->use = Use_DoorTrigger;
+
 	other->mins = mins;
 	other->maxs = maxs;
 	other->owner = ent;
@@ -1687,7 +1774,7 @@ THINK(Think_DoorActivateAreaPortal) (edict_t *ent) -> void
 {
 	door_use_areaportals(ent, true);
 
-	if (ent->health || ent->targetname)
+	if (ent->health || (ent->targetname && !ent->pathtarget)) // Sarah: changed condition
 		Think_CalcMoveSpeed(ent);
 	else
 		Think_SpawnDoorTrigger(ent);
@@ -1769,13 +1856,20 @@ void SP_func_door(edict_t *ent)
 		ent->die = door_killed;
 		ent->max_health = ent->health;
 	}
-	else if (ent->targetname)
+	else if (ent->targetname && !ent->pathtarget) // Sarah: changed condition
 	{
 		if (ent->message)
 		{
 			gi.soundindex("misc/talk.wav");
 			ent->touch = door_touch;
 		}
+
+		// Sarah: if unlockable flag set, the door spawns a trigger box when targeted
+		if (ent->spawnflags.has(SPAWNFLAG_DOOR_UNLOCKABLE))
+		{
+			ent->use = Use_DoorUnlockable;
+		}
+
 		ent->flags |= FL_LOCKED;
 	}
 
@@ -1803,7 +1897,7 @@ void SP_func_door(edict_t *ent)
 	
 	if (ent->spawnflags.has(SPAWNFLAG_DOOR_START_OPEN))
 		ent->think = Think_DoorActivateAreaPortal;
-	else if (ent->health || ent->targetname)
+	else if (ent->health || (ent->targetname && !ent->pathtarget)) // Sarah: changed condition
 		ent->think = Think_CalcMoveSpeed;
 	else
 		ent->think = Think_SpawnDoorTrigger;
@@ -1955,10 +2049,19 @@ void SP_func_door_rotating(edict_t *ent)
 		ent->max_health = ent->health;
 	}
 
-	if (ent->targetname && ent->message)
+	// Sarah: added unlockable functionality
+	if (ent->targetname && !ent->pathtarget)
 	{
-		gi.soundindex("misc/talk.wav");
-		ent->touch = door_touch;
+		if (ent->message)
+		{
+			gi.soundindex("misc/talk.wav");
+			ent->touch = door_touch;
+		}
+
+		if (ent->spawnflags.has(SPAWNFLAG_DOOR_UNLOCKABLE))
+		{
+			ent->use = Use_DoorUnlockable;
+		}
 	}
 
 	ent->moveinfo.state = STATE_BOTTOM;
@@ -1982,7 +2085,7 @@ void SP_func_door_rotating(edict_t *ent)
 	gi.linkentity(ent);
 
 	ent->nextthink = level.time + FRAME_TIME_S;
-	if (ent->health || ent->targetname)
+	if (ent->health || (ent->targetname && !ent->pathtarget)) // Sarah: changed condition
 		ent->think = Think_CalcMoveSpeed;
 	else
 		ent->think = Think_SpawnDoorTrigger;
@@ -2248,6 +2351,9 @@ again:
 		}
 		first = false;
 
+		// Sarah - save train position for relative position calculation later for teamchain teleport
+		vec3_t origin = self->s.origin;
+
 		if (self->spawnflags.has(SPAWNFLAG_TRAIN_USE_ORIGIN))
 			self->s.origin = ent->s.origin;
 		else
@@ -2261,6 +2367,19 @@ again:
 		self->s.old_origin = self->s.origin;
 		self->s.event = EV_OTHER_TELEPORT;
 		gi.linkentity(self);
+
+		// Sarah: make teamchain teleport
+		if (self->spawnflags.has(SPAWNFLAG_TRAIN_MOVE_TEAMCHAIN))
+		{
+			for (edict_t* e = self->teamchain; e; e = e->teamchain)
+			{
+				e->s.origin = self->s.origin + e->s.origin - origin;
+				e->s.old_origin = e->s.origin;
+				e->s.event = EV_OTHER_TELEPORT;
+				gi.linkentity(e);
+			}
+		}
+
 		goto again;
 	}
 
@@ -2361,13 +2480,10 @@ void train_resume(edict_t *self)
 	// Sarah: Added to make toggle respect move teamchain
 	if (self->spawnflags.has(SPAWNFLAG_TRAIN_MOVE_TEAMCHAIN))
 	{
-		edict_t* e;
-		vec3_t	 dir, dst;
-
-		dir = dest - self->s.origin;
-		for (e = self->teamchain; e; e = e->teamchain)
+		vec3_t dir = dest - self->s.origin;
+		for (edict_t* e = self->teamchain; e; e = e->teamchain)
 		{
-			dst = dir + e->s.origin;
+			vec3_t dst = dir + e->s.origin;
 			e->moveinfo.start_origin = e->s.origin;
 			e->moveinfo.end_origin = dst;
 
@@ -2399,6 +2515,9 @@ THINK(func_train_find) (edict_t *self) -> void
 	}
 	self->target = ent->target;
 
+	// Sarah - save train position for relative position calculation later for teamchain start position
+	vec3_t origin = self->s.origin;
+
 	if (self->spawnflags.has(SPAWNFLAG_TRAIN_USE_ORIGIN))
 		self->s.origin = ent->s.origin;
 	else
@@ -2410,6 +2529,16 @@ THINK(func_train_find) (edict_t *self) -> void
 	}
 
 	gi.linkentity(self);
+
+	// Sarah: move teamchain into starting position
+	if (self->spawnflags.has(SPAWNFLAG_TRAIN_MOVE_TEAMCHAIN))
+	{
+		for (edict_t* e = self->teamchain; e; e = e->teamchain)
+		{
+			e->s.origin = self->s.origin + e->s.origin - origin;
+			gi.linkentity(e);
+		}
+	}
 
 	// if not triggered, start immediately
 	if (!self->targetname)
@@ -2438,9 +2567,7 @@ USE(train_use) (edict_t *self, edict_t *other, edict_t *activator) -> void
 		// Sarah: Added to make toggle respect move teamchain
 		if (self->spawnflags.has(SPAWNFLAG_TRAIN_MOVE_TEAMCHAIN))
 		{
-			edict_t* e;
-
-			for (e = self->teamchain; e; e = e->teamchain)
+			for (edict_t* e = self->teamchain; e; e = e->teamchain)
 			{
 				e->velocity = {};
 				e->nextthink = 0_ms;

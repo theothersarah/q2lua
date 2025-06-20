@@ -178,6 +178,10 @@ void G_UseTargets(edict_t *ent, edict_t *activator)
 		t->message = ent->message;
 		t->target = ent->target;
 		t->killtarget = ent->killtarget;
+
+		// Sarah: add script_arg to the delay temp entity
+		t->script_arg = ent->script_arg;
+
 		return;
 	}
 
