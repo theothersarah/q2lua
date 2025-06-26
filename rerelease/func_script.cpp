@@ -6,6 +6,12 @@
 // String pool
 // =============================================================================
 
+// Strings from Lua won't exist outside of the function they are on the stack of,
+// so they are copied into this string pool when they need to exist for longer.
+// If a string with duplicate contents is added again, instead of adding a copy,
+// it returns the original. The pool is cleared before a level's script is
+// loaded.
+
 static std::unordered_set<std::string> script_stringpool;
 
 static const char* script_stringpool_add(const char* newstr)
@@ -17,7 +23,13 @@ static const char* script_stringpool_add(const char* newstr)
 // Entity functions
 // =============================================================================
 
-// Structure for entity
+// Entities are represented by userdatas, and their member functions are added to
+// a metatable named script_entity. Every function assumes the first argument will
+// be an entity object, so they work as member functions with colon notation. When
+// an entity is acquired, it checks the entity for validity by making sure the slot
+// hasn't been freed since the entity object was created.
+
+// Userdata structure for entity
 // spawn_count is incremented for a given slot whenever the entity in that slot is freed,
 // so this helps us make sure that the reference is still valid or not
 struct script_ud_ent_t
@@ -221,7 +233,7 @@ static int script_entity_set(lua_State* L)
 	return 0;
 }
 
-// Function for delayed trigger
+// Function for delayed trigger temporary entity
 THINK(script_entity_trigger_delay) (edict_t* self) -> void
 {
 	edict_t* ent = self->target_ent;
@@ -242,7 +254,7 @@ THINK(script_entity_trigger_delay) (edict_t* self) -> void
 	G_FreeEdict(self);
 }
 
-// Triggers the entity
+// Triggers the entity, spawning a temporary entity to do it later if a delay is specified
 static int script_entity_trigger(lua_State* L)
 {
 	edict_t* ent = script_check_entity(L, 1);
@@ -252,7 +264,7 @@ static int script_entity_trigger(lua_State* L)
 	// Second argument is an optional delay
 	float delay = -1;
 
-	if (nargs > 1)
+	if (nargs > 1 && lua_type(L, 2) != LUA_TNIL)
 	{
 		delay = luaL_checknumber(L, 2);
 	}
@@ -276,7 +288,7 @@ static int script_entity_trigger(lua_State* L)
 	{
 		// Spawn a temporary entity to trigger it later
 		edict_t* t = G_Spawn();
-		t->classname = "DelayedUse";
+		t->classname = "DelayedTrigger";
 		t->nextthink = level.time + gtime_t::from_sec(delay);
 		t->think = script_entity_trigger_delay;
 		t->activator = activator;
@@ -308,8 +320,125 @@ static int script_entity_trigger(lua_State* L)
 	return 0;
 }
 
+// Kills the entity, same as killtarget on a trigger, meaning it outright deletes the entity
+// Note that monsters are sent directly to the shadow realm without playing death animations
+
+void G_MonsterKilled(edict_t* self);
+
+static void script_entity_do_kill(edict_t* ent)
+{
+	if (ent->teammaster)
+	{
+		if (ent->flags & FL_TEAMSLAVE)
+		{
+			for (edict_t* master = ent->teammaster; master; master = master->teamchain)
+			{
+				if (master->teamchain == ent)
+				{
+					master->teamchain = ent->teamchain;
+					break;
+				}
+			}
+		}
+		else if (ent->flags & FL_TEAMMASTER)
+		{
+			ent->teammaster->flags &= ~FL_TEAMMASTER;
+
+			edict_t* new_master = ent->teammaster->teamchain;
+
+			if (new_master)
+			{
+				new_master->flags |= FL_TEAMMASTER;
+				new_master->flags &= ~FL_TEAMSLAVE;
+
+				for (edict_t* m = new_master; m; m = m->teamchain)
+				{
+					m->teammaster = new_master;
+				}
+			}
+		}
+	}
+
+	if (ent->svflags & SVF_MONSTER)
+	{
+		if (!ent->deadflag && !(ent->monsterinfo.aiflags & AI_DO_NOT_COUNT) && !(ent->spawnflags & SPAWNFLAG_MONSTER_DEAD))
+		{
+			G_MonsterKilled(ent);
+		}
+	}
+
+	G_FreeEdict(ent);
+}
+
+// Function for delayed kill temporary entity
+THINK(script_entity_kill_delay) (edict_t* self) -> void
+{
+	edict_t* ent = self->target_ent;
+
+	if (ent->spawn_count != self->count)
+	{
+		gi.Com_Print("func_script delayed kill target no longer exists\n");
+	}
+	else
+	{
+		script_entity_do_kill(ent);
+	}
+
+	G_FreeEdict(self);
+}
+
+// Kills a target, spawning a temporary entity to do it later if a delay is specified
+static int script_entity_kill(lua_State* L)
+{
+	edict_t* ent = script_check_entity(L, 1);
+
+	int nargs = lua_gettop(L);
+
+	// Second argument is an optional delay
+	float delay = -1;
+
+	if (nargs > 1 && lua_type(L, 2) != LUA_TNIL)
+	{
+		delay = luaL_checknumber(L, 2);
+	}
+
+	if (delay > 0)
+	{
+		// Spawn a temporary entity to kill it later
+		edict_t* t = G_Spawn();
+		t->classname = "DelayedKill";
+		t->nextthink = level.time + gtime_t::from_sec(delay);
+		t->think = script_entity_kill_delay;
+		t->target_ent = ent;
+		t->count = ent->spawn_count;
+
+		return 0;
+	}
+	else
+	{
+		script_entity_do_kill(ent);
+	}
+
+	return 0;
+}
+
+// If the entity is a player, display a message on their screen
+// This uses the same style and sound as trigger messages
+static int script_entity_message(lua_State* L)
+{
+	edict_t* ent = script_check_entity(L, 1);
+	const char* message = luaL_checkstring(L, 2);
+
+	gi.LocCenter_Print(ent, "{}", message);
+	gi.sound(ent, CHAN_AUTO, gi.soundindex("misc/talk1.wav"), 1, ATTN_NORM, 0);
+
+	return 0;
+}
+
 // Special function for target_strings - set the displayed string without adding the value to the string pool
-int script_entity_setstring(lua_State* L)
+// This is potentially beneficial because the string has no need to be stored and theoretically a lot of strings
+// could be generated if the number is changed often to a lot of different values
+static int script_entity_setstring(lua_State* L)
 {
 	edict_t* ent = script_check_entity(L, 1);
 	const char* str = luaL_checkstring(L, 2);
@@ -330,19 +459,32 @@ int script_entity_setstring(lua_State* L)
 	return 0;
 }
 
-// Return true if an entity reference is still valid, or false if it has gone stale
-int script_entity_valid(lua_State* L)
+// Returns true if the entity is a player
+static int script_entity_player(lua_State* L)
+{
+	edict_t* ent = script_check_entity(L, 1);
+
+	lua_pushboolean(L, ent->svflags & SVF_PLAYER);
+
+	return 1;
+}
+
+// Returns true if the entity is a monster
+static int script_entity_monster(lua_State* L)
+{
+	edict_t* ent = script_check_entity(L, 1);
+
+	lua_pushboolean(L, ent->svflags & SVF_MONSTER);
+
+	return 1;
+}
+
+// Returns true if an entity reference is still valid, or false if it has gone stale
+static int script_entity_valid(lua_State* L)
 {
 	edict_t* ent = script_check_entity(L, 1, false);
 
-	if (ent != nullptr)
-	{
-		lua_pushboolean(L, 1);
-	}
-	else
-	{
-		lua_pushboolean(L, 0);
-	}
+	lua_pushboolean(L, ent != nullptr);
 
 	return 1;
 }
@@ -376,6 +518,8 @@ static int script_find(lua_State* L)
 	int key = luaL_checkoption(L, 2, "targetname", script_entity_keys);
 
 	// Get a search function for the given key
+	// Using a function pointer here is a bit weird, but this is the only way I could think of
+	// to use different versions of the templated function in one place
 	edict_t* (*search_function)(edict_t*, const std::string_view&) = nullptr;
 
 	switch (key)
@@ -690,6 +834,14 @@ void script_load(const char* mapname)
 	lua_setfield(L, -2, "trigger");
 	lua_pushcfunction(L, script_entity_setstring);
 	lua_setfield(L, -2, "setstring");
+	lua_pushcfunction(L, script_entity_kill);
+	lua_setfield(L, -2, "kill");
+	lua_pushcfunction(L, script_entity_message);
+	lua_setfield(L, -2, "message");
+	lua_pushcfunction(L, script_entity_player);
+	lua_setfield(L, -2, "player");
+	lua_pushcfunction(L, script_entity_monster);
+	lua_setfield(L, -2, "monster");
 	lua_pushcfunction(L, script_entity_valid);
 	lua_setfield(L, -2, "valid");
 	lua_setfield(L, -2, "__index");
@@ -831,6 +983,8 @@ void script_set_global_variables(std::unordered_map<std::string, std::string> gl
 }
 
 // Get a pointer to the crosslevel variables for clearing, saving, and loading
+// These live in the unordered_map all the time so this function can be used for both
+// saving and loading the variables
 std::unordered_map<std::string, std::string>* script_get_crosslevel_variables()
 {
 	return &script_crosslevel_variables;
@@ -903,154 +1057,4 @@ USE(func_script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
 void SP_func_script(edict_t* self)
 {
 	self->use = func_script_use;
-}
-
-// =============================================================================
-// func_button_scripted entity
-// =============================================================================
-
-void button_scripted_touch(edict_t* self, edict_t* other, const trace_t& tr, bool other_touching_self);
-void button_scripted_killed(edict_t* self, edict_t* inflictor, edict_t* attacker, int damage, const vec3_t& point, const mod_t& mod);
-
-USE(button_scripted_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
-{
-	if (!self->bmodel_anim.enabled)
-	{
-		if (level.is_n64)
-		{
-			self->s.frame = 0;
-		}
-		else
-		{
-			self->s.effects &= ~EF_ANIM23;
-		}
-
-		self->s.effects |= EF_ANIM01;
-	}
-	else
-	{
-		self->bmodel_anim.alternate = false;
-	}
-
-	if (self->health > 0)
-	{
-		self->die = button_scripted_killed;
-		self->takedamage = true;
-	}
-	else
-	{
-		self->touch = button_scripted_touch;
-	}
-
-	self->use = nullptr;
-}
-
-static void button_scripted_fire(edict_t* self)
-{
-	if (!self->bmodel_anim.enabled)
-	{
-		self->s.effects &= ~EF_ANIM01;
-		if (level.is_n64)
-		{
-			self->s.frame = 2;
-		}
-		else
-		{
-			self->s.effects |= EF_ANIM23;
-		}
-	}
-	else
-	{
-		self->bmodel_anim.alternate = true;
-	}
-
-	// Using this button will now reset it
-	self->use = button_scripted_use;
-
-	G_UseTargets(self, self->activator);
-}
-
-TOUCH(button_scripted_touch) (edict_t* self, edict_t* other, const trace_t& tr, bool other_touching_self) -> void
-{
-	if (!other->client)
-	{
-		return;
-	}
-
-	self->touch = nullptr;
-
-	self->activator = other;
-	button_scripted_fire(self);
-}
-
-DIE(button_scripted_killed) (edict_t* self, edict_t* inflictor, edict_t* attacker, int damage, const vec3_t& point, const mod_t& mod) -> void
-{
-	self->die = nullptr;
-
-	self->activator = attacker;
-	self->health = self->max_health;
-	self->takedamage = false;
-	button_scripted_fire(self);
-}
-
-void SP_func_button_scripted(edict_t* ent)
-{
-	ent->movetype = MOVETYPE_PUSH;
-	ent->solid = SOLID_BSP;
-	gi.setmodel(ent, ent->model);
-
-	if (!ent->bmodel_anim.enabled)
-	{
-		ent->s.effects |= EF_ANIM01;
-	}
-
-	if (ent->health > 0)
-	{
-		ent->max_health = ent->health;
-		ent->die = button_scripted_killed;
-		ent->takedamage = true;
-	}
-	else
-	{
-		ent->touch = button_scripted_touch;
-	}
-
-	gi.linkentity(ent);
-}
-
-// =============================================================================
-// trigger_enter_level entity
-// =============================================================================
-
-THINK(trigger_level_enter_think) (edict_t* self) -> void
-{
-	G_UseTargets(self, self);
-}
-
-void SP_trigger_enter_level(edict_t* self)
-{
-	if (!self->delay)
-	{
-		self->delay = 1;
-	}
-
-	self->think = trigger_level_enter_think;
-	self->nextthink = level.time + gtime_t::from_sec(self->delay);
-}
-
-// =============================================================================
-// path_track entity
-// =============================================================================
-
-// Spawnflags:
-// 1 - Teleport
-
-void SP_path_track(edict_t* self)
-{
-	if (!self->targetname)
-	{
-		gi.Com_PrintFmt("{} with no targetname\n", *self);
-		G_FreeEdict(self);
-		return;
-	}
 }

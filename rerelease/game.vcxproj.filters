@@ -247,6 +247,8 @@
     <ClCompile Include="xatrix\p_xatrix_weapon.cpp">
       <Filter>xatrix</Filter>
     </ClCompile>
+    <ClCompile Include="func_script.cpp" />
+    <ClCompile Include="entities.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Filter Include="bots">
