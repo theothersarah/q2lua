@@ -222,6 +222,7 @@ void SP_func_script(edict_t* self);
 void SP_func_button_scripted(edict_t* self);
 void SP_trigger_enter_level(edict_t* self);
 void SP_path_track(edict_t* self);
+void SP_func_mover(edict_t* self);
 
 // clang-format off
 static const std::initializer_list<spawn_t> spawns = {
@@ -445,7 +446,8 @@ static const std::initializer_list<spawn_t> spawns = {
 	{ "func_script", SP_func_script },
 	{ "func_button_scripted", SP_func_button_scripted },
 	{ "trigger_enter_level", SP_trigger_enter_level },
-	{ "path_track", SP_path_track }
+	{ "path_track", SP_path_track },
+	{ "func_mover", SP_func_mover }
 };
 // clang-format on
 
@@ -998,7 +1000,7 @@ void G_FixTeams()
 			continue;
 		if (!e->team)
 			continue;
-		if (!strcmp(e->classname, "func_train") && e->spawnflags.has(SPAWNFLAG_TRAIN_MOVE_TEAMCHAIN))
+		if ((!strcmp(e->classname, "func_train") || !strcmp(e->classname, "func_mover")) && e->spawnflags.has(SPAWNFLAG_TRAIN_MOVE_TEAMCHAIN)) // Sarah: add func_mover
 		{
 			if (e->flags & FL_TEAMSLAVE)
 			{

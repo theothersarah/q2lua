@@ -49,7 +49,7 @@ static edict_t* script_check_entity(lua_State* L, int arg, bool error = true)
 	{
 		if (error)
 		{
-			luaL_error(L, "entity reference is no longer valid");
+			luaL_argerror(L, arg, "entity reference is no longer valid");
 		}
 
 		return nullptr;
@@ -67,13 +67,19 @@ enum script_entity_keys_index
 	ENTITY_KEY_TARGET,
 	ENTITY_KEY_KILLTARGET,
 	ENTITY_KEY_PATHTARGET,
+	ENTITY_KEY_DEATHTARGET,
+	ENTITY_KEY_HEALTHTARGET,
+	ENTITY_KEY_ITEMTARGET,
+	ENTITY_KEY_COMBATTARGET,
+	ENTITY_KEY_SCRIPT_FUNCTION,
 	ENTITY_KEY_SCRIPT_ARG,
 	ENTITY_KEY_MESSAGE,
 	ENTITY_KEY_DELAY,
 	ENTITY_KEY_WAIT,
 	ENTITY_KEY_SPEED,
-	ENTITY_KEY_COUNT
-
+	ENTITY_KEY_COUNT,
+	ENTITY_KEY_MAX_HEALTH,
+	ENTITY_KEY_HEALTH
 };
 
 static const char* script_entity_keys[] =
@@ -84,12 +90,19 @@ static const char* script_entity_keys[] =
 	"target",
 	"killtarget",
 	"pathtarget",
+	"deathtarget",
+	"healthtarget",
+	"itemtarget",
+	"combattarget",
+	"script_function",
 	"script_arg",
 	"message",
 	"delay",
 	"wait",
 	"speed",
 	"count",
+	"max_health",
+	"health",
 	nullptr
 };
 
@@ -138,6 +151,26 @@ static int script_entity_get(lua_State* L)
 		script_entity_get_string(L, ent->pathtarget);
 		break;
 
+	case ENTITY_KEY_DEATHTARGET:
+		script_entity_get_string(L, ent->deathtarget);
+		break;
+
+	case ENTITY_KEY_HEALTHTARGET:
+		script_entity_get_string(L, ent->healthtarget);
+		break;
+
+	case ENTITY_KEY_ITEMTARGET:
+		script_entity_get_string(L, ent->itemtarget);
+		break;
+
+	case ENTITY_KEY_COMBATTARGET:
+		script_entity_get_string(L, ent->combattarget);
+		break;
+
+	case ENTITY_KEY_SCRIPT_FUNCTION:
+		script_entity_get_string(L, ent->script_function);
+		break;
+
 	case ENTITY_KEY_SCRIPT_ARG:
 		script_entity_get_string(L, ent->script_arg);
 		break;
@@ -160,6 +193,14 @@ static int script_entity_get(lua_State* L)
 
 	case ENTITY_KEY_COUNT:
 		lua_pushinteger(L, ent->count);
+		break;
+
+	case ENTITY_KEY_MAX_HEALTH:
+		lua_pushinteger(L, ent->max_health);
+		break;
+
+	case ENTITY_KEY_HEALTH:
+		lua_pushinteger(L, ent->health);
 		break;
 
 	default:
@@ -200,6 +241,22 @@ static int script_entity_set(lua_State* L)
 
 	case ENTITY_KEY_PATHTARGET:
 		ent->pathtarget = script_entity_set_string(luaL_checkstring(L, 3));
+		break;
+
+	case ENTITY_KEY_DEATHTARGET:
+		ent->deathtarget = script_entity_set_string(luaL_checkstring(L, 3));
+		break;
+
+	case ENTITY_KEY_HEALTHTARGET:
+		ent->healthtarget = script_entity_set_string(luaL_checkstring(L, 3));
+		break;
+
+	case ENTITY_KEY_ITEMTARGET:
+		ent->itemtarget = script_entity_set_string(luaL_checkstring(L, 3));
+		break;
+
+	case ENTITY_KEY_COMBATTARGET:
+		ent->combattarget = script_entity_set_string(luaL_checkstring(L, 3));
 		break;
 
 	case ENTITY_KEY_SCRIPT_ARG:
@@ -492,7 +549,7 @@ static int script_entity_valid(lua_State* L)
 // Creates an entity object at the top of the stack
 static void script_push_entity(lua_State* L, edict_t* ent)
 {
-	struct script_ud_ent_t* ud = (struct script_ud_ent_t*)lua_newuserdata(L, sizeof(struct script_ud_ent_t*));
+	struct script_ud_ent_t* ud = (struct script_ud_ent_t*)lua_newuserdatauv(L, sizeof(struct script_ud_ent_t), 0);
 
 	ud->ent = ent;
 	ud->spawn_count = ent->spawn_count;
@@ -511,7 +568,7 @@ static void script_push_entity(lua_State* L, edict_t* ent)
 // API functions
 // =============================================================================
 
-// Find all entities with a given value for a string key (defaulting to targetname)
+// Returns a list of all entities with a given value for a string key (defaulting to targetname)
 static int script_find(lua_State* L)
 {
 	const char* value = luaL_checkstring(L, 1);
@@ -548,8 +605,32 @@ static int script_find(lua_State* L)
 		search_function = G_FindByString<&edict_t::pathtarget>;
 		break;
 
+	case ENTITY_KEY_DEATHTARGET:
+		search_function = G_FindByString<&edict_t::deathtarget>;
+		break;
+
+	case ENTITY_KEY_HEALTHTARGET:
+		search_function = G_FindByString<&edict_t::healthtarget>;
+		break;
+
+	case ENTITY_KEY_ITEMTARGET:
+		search_function = G_FindByString<&edict_t::itemtarget>;
+		break;
+
+	case ENTITY_KEY_COMBATTARGET:
+		search_function = G_FindByString<&edict_t::combattarget>;
+		break;
+
+	case ENTITY_KEY_SCRIPT_FUNCTION:
+		search_function = G_FindByString<&edict_t::script_function>;
+		break;
+
 	case ENTITY_KEY_SCRIPT_ARG:
 		search_function = G_FindByString<&edict_t::script_arg>;
+		break;
+
+	case ENTITY_KEY_MESSAGE:
+		search_function = G_FindByString<&edict_t::message>;
 		break;
 
 	default:
@@ -572,6 +653,118 @@ static int script_find(lua_State* L)
 	return 1;
 }
 
+// For each element in a list, calls a function with that element as the argument
+static int script_foreach(lua_State* L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	luaL_checktype(L, 2, LUA_TFUNCTION);
+
+	int n = lua_rawlen(L, 1);
+
+	for (int i = 1; i <= n; i++)
+	{
+		lua_pushvalue(L, 2);
+		lua_rawgeti(L, 1, i);
+		lua_call(L, 1, 0);
+	}
+
+	return 0;
+}
+
+// Same as foreach, but returns a list containing every element for which the function returned anything but nil or false
+// Also returns an integer containing the count as a second return value
+static int script_filter(lua_State* L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	luaL_checktype(L, 2, LUA_TFUNCTION);
+
+	int n = lua_rawlen(L, 1);
+
+	int count = 0;
+
+	lua_newtable(L);
+
+	for (int i = 1; i <= n; i++)
+	{
+		lua_pushvalue(L, 2);
+		lua_rawgeti(L, 1, i);
+		lua_call(L, 1, 1);
+
+		int keep = lua_toboolean(L, -1);
+		lua_pop(L, 1);
+
+		if (keep)
+		{
+			lua_rawgeti(L, 1, i);
+			lua_rawseti(L, -2, ++count);
+		}
+	}
+
+	lua_pushinteger(L, count);
+
+	return 2;
+}
+
+// Returns a randomly-selected element from the list
+static int script_pick(lua_State* L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+
+	int n = lua_rawlen(L, 1);
+
+	if (n == 0)
+	{
+		lua_pushnil(L);
+	}
+	else
+	{
+		lua_rawgeti(L, 1, 1 + irandom(n - 1));
+	}
+
+	return 1;
+}
+
+// Iterator function equivalent to the values iterator from Programming in Lua
+static int script_values_iterator(lua_State* L)
+{
+	// Increment the index
+	lua_pushvalue(L, lua_upvalueindex(2));
+	lua_pushinteger(L, 1);
+	lua_arith(L, LUA_OPADD);
+
+	// Get the value of the index and overwrite the old upvalue
+	int i = lua_tointeger(L, -1);
+	lua_replace(L, lua_upvalueindex(2));
+
+	// Return the element at that index
+	lua_rawgeti(L, lua_upvalueindex(1), i);
+
+	return 1;
+}
+
+// Factory for the values iterator
+static int script_values(lua_State* L)
+{
+	// Argument must be a table and is the iterator's first upvalue
+	luaL_checktype(L, 1, LUA_TTABLE);
+
+	// Pop excess arguments
+	int n = lua_gettop(L);
+
+	if (n > 1)
+	{
+		lua_pop(L, n - 1);
+	}
+
+	// An index is the iterator's second upvalue
+	lua_pushinteger(L, 0);
+
+	// Push the function as the return value
+	lua_pushcclosure(L, script_values_iterator, 2);
+
+	return 1;
+}
+
 // =============================================================================
 // Global variables
 // =============================================================================
@@ -588,7 +781,7 @@ static int script_global_set(lua_State* L)
 	}
 	else
 	{
-		return luaL_argerror(L, 2, "invalid type: must be nil, number, boolean, string, or entity");
+		return luaL_argerror(L, 3, "invalid type: must be nil, number, boolean, string, or entity");
 	}
 
 	return 0;
@@ -670,6 +863,32 @@ static int script_crosslevel_set(lua_State* L)
 // =============================================================================
 // Script loading
 // =============================================================================
+
+// Entity member functions
+const luaL_Reg script_entity_functions[] =
+{
+	{"get", script_entity_get},
+	{"set", script_entity_set},
+	{"trigger", script_entity_trigger},
+	{"setstring", script_entity_setstring},
+	{"kill", script_entity_kill},
+	{"message", script_entity_message},
+	{"player", script_entity_player},
+	{"monster", script_entity_monster},
+	{"valid", script_entity_valid},
+	{nullptr, nullptr}
+};
+
+// API functions
+const luaL_Reg script_functions[] =
+{
+	{"find", script_find},
+	{"foreach", script_foreach},
+	{"filter", script_filter},
+	{"pick", script_pick},
+	{"values", script_values},
+	{nullptr, nullptr}
+};
 
 // Metafunction __newindex: Allow only string/function pairs to be added
 // Also checks for restricted names
@@ -759,14 +978,11 @@ void script_load(const char* mapname)
 	lua_setmetatable(L, -2);
 	lua_pop(L, 1);
 
-	// Table for API
+	// Create table for API
 	lua_newtable(L);
+	luaL_setfuncs(L, script_functions, 0);
 
-	// API functions
-	lua_pushcfunction(L, script_find);
-	lua_setfield(L, -2, "find");
-
-	// API table for globals
+	// Add table for globals
 	lua_newtable(L);
 	lua_newtable(L);
 	lua_pushcfunction(L, script_global_set);
@@ -774,7 +990,7 @@ void script_load(const char* mapname)
 	lua_setmetatable(L, -2);
 	lua_setfield(L, -2, "globals");
 
-	// API table for crosslevel variables
+	// Add table for crosslevel variables
 	lua_newtable(L);
 	lua_newtable(L);
 	lua_pushcfunction(L, script_crosslevel_get);
@@ -784,7 +1000,7 @@ void script_load(const char* mapname)
 	lua_setmetatable(L, -2);
 	lua_setfield(L, -2, "crosslevel");
 
-	// Standard libraries
+	// Add math library
 	luaopen_math(L);
 	lua_newtable(L);
 	lua_pushcfunction(L, script_readonly);
@@ -792,6 +1008,7 @@ void script_load(const char* mapname)
 	lua_setmetatable(L, -2);
 	lua_setfield(L, -2, "math");
 
+	// Add string library
 	luaopen_string(L);
 	lua_newtable(L);
 	lua_pushcfunction(L, script_readonly);
@@ -799,6 +1016,7 @@ void script_load(const char* mapname)
 	lua_setmetatable(L, -2);
 	lua_setfield(L, -2, "string");
 
+	// Add table library
 	luaopen_table(L);
 	lua_newtable(L);
 	lua_pushcfunction(L, script_readonly);
@@ -806,7 +1024,7 @@ void script_load(const char* mapname)
 	lua_setmetatable(L, -2);
 	lua_setfield(L, -2, "table");
 
-	// Metatable for API
+	// Write protect API
 	lua_newtable(L);
 	lua_pushcfunction(L, script_readonly);
 	lua_setfield(L, -2, "__newindex");
@@ -815,7 +1033,7 @@ void script_load(const char* mapname)
 	// Add API to the global table
 	lua_setglobal(L, "script");
 
-	// Write protect locals
+	// Write protect globals
 	lua_geti(L, LUA_REGISTRYINDEX, LUA_RIDX_GLOBALS);
 	lua_newtable(L);
 	lua_pushcfunction(L, script_readonly);
@@ -823,33 +1041,15 @@ void script_load(const char* mapname)
 	lua_setmetatable(L, -2);
 	lua_pop(L, 1);
 
-	// Metatable for entity objects
+	// Create metatable for entity objects
 	luaL_newmetatable(L, "script_entity");
-	lua_newtable(L);
-	lua_pushcfunction(L, script_entity_get);
-	lua_setfield(L, -2, "get");
-	lua_pushcfunction(L, script_entity_set);
-	lua_setfield(L, -2, "set");
-	lua_pushcfunction(L, script_entity_trigger);
-	lua_setfield(L, -2, "trigger");
-	lua_pushcfunction(L, script_entity_setstring);
-	lua_setfield(L, -2, "setstring");
-	lua_pushcfunction(L, script_entity_kill);
-	lua_setfield(L, -2, "kill");
-	lua_pushcfunction(L, script_entity_message);
-	lua_setfield(L, -2, "message");
-	lua_pushcfunction(L, script_entity_player);
-	lua_setfield(L, -2, "player");
-	lua_pushcfunction(L, script_entity_monster);
-	lua_setfield(L, -2, "monster");
-	lua_pushcfunction(L, script_entity_valid);
-	lua_setfield(L, -2, "valid");
+	luaL_newlib(L, script_entity_functions);
 	lua_setfield(L, -2, "__index");
 	lua_pushcfunction(L, script_readonly);
 	lua_setfield(L, -2, "__newindex");
 	lua_pop(L, 1);
 
-	// Stack for trigger context
+	// Create stack for trigger context
 	lua_newtable(L);
 	lua_setfield(L, LUA_REGISTRYINDEX, "script_triggerstack");
 
@@ -996,17 +1196,10 @@ std::unordered_map<std::string, std::string>* script_get_crosslevel_variables()
 
 USE(func_script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
 {
-	// Make sure the entity is set up correctly
-	if (!self->script_function)
-	{
-		gi.Com_Print("func_script triggered but has no function\n");
-		return;
-	}
-
 	// Make sure the scripting engine is actually active
 	if (L == nullptr)
 	{
-		gi.Com_Print("func_script triggered but script not loaded\n");
+		gi.Com_PrintFmt("{} triggered but script not loaded\n", *self);
 		return;
 	}
 
@@ -1015,7 +1208,7 @@ USE(func_script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
 
 	if (lua_type(L, -1) != LUA_TFUNCTION)
 	{
-		gi.Com_PrintFmt("func_script attempting to call nonexistent function {}\n", self->script_function);
+		gi.Com_PrintFmt("{} attempting to call nonexistent function {}\n", *self, self->script_function);
 		lua_pop(L, 1);
 		return;
 	}
@@ -1043,7 +1236,7 @@ USE(func_script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
 	if (lua_pcall(L, 3, 0, 0) != LUA_OK)
 	{
 		const char* errstr = lua_tostring(L, -1);
-		gi.Com_PrintFmt("Func_script error calling function {}: {}\n", self->script_function, errstr);
+		gi.Com_PrintFmt("{} error calling function {}: {}\n", *self, self->script_function, errstr);
 		lua_pop(L, 1);
 	}
 
@@ -1056,5 +1249,13 @@ USE(func_script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
 
 void SP_func_script(edict_t* self)
 {
+	// Make sure the entity is set up correctly
+	if (!self->script_function)
+	{
+		gi.Com_PrintFmt("{} has no function set\n", *self);
+		G_FreeEdict(self);
+		return;
+	}
+
 	self->use = func_script_use;
 }

@@ -149,3 +149,40 @@ void SP_path_track(edict_t* self)
 		return;
 	}
 }
+
+// =============================================================================
+// func_mover entity
+// =============================================================================
+
+void SP_func_mover(edict_t *self)
+{
+	self->movetype = MOVETYPE_PUSH;
+
+	if (!self->speed)
+	{
+		self->speed = 100;
+	}
+
+	self->moveinfo.speed = self->speed;
+	self->moveinfo.accel = self->moveinfo.decel = self->moveinfo.speed;
+
+	self->use = train_use;
+
+	if (self->target)
+	{
+		self->nextthink = level.time + FRAME_TIME_S;
+		self->think = func_train_find;
+	}
+	else
+	{
+		gi.Com_PrintFmt("{}: no target\n", *self);
+		G_FreeEdict(self);
+	}
+
+	if (self->model)
+	{
+		self->s.modelindex = gi.modelindex(self->model);
+	}
+
+	gi.linkentity(self);
+}
