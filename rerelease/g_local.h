@@ -2656,12 +2656,11 @@ constexpr spawnflags_t SPAWNFLAG_LANDMARK_KEEP_Z = 1_spawnflag;
 // func_script.c
 //
 
+void script_init();
 void script_load(const char* mapname);
 
-std::unordered_map<std::string, std::string> script_get_global_variables();
-void script_set_global_variables(std::unordered_map<std::string, std::string> globals);
-
-std::unordered_map<std::string, std::string>* script_get_crosslevel_variables();
+void script_get_variables(std::unordered_map<std::string, std::string>& variables, bool crosslevel = false);
+void script_set_variables(std::unordered_map<std::string, std::string>& variables, bool crosslevel = false);
 
 //============================================================================
 

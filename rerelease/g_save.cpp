@@ -2420,11 +2420,13 @@ char *WriteGameJson(bool autosave, size_t *out_size)
 	json["clients"] = std::move(clients);
 
 	// Sarah: write crosslevel variables
-	auto crosslevel_variables = script_get_crosslevel_variables();
+	std::unordered_map<std::string, std::string> crosslevel_variables;
+
+	script_get_variables(crosslevel_variables, true);
 
 	Json::Value crosslevel_variables_json(Json::objectValue);
 
-	for (auto it = crosslevel_variables->begin(); it != crosslevel_variables->end(); ++it)
+	for (auto it = crosslevel_variables.begin(); it != crosslevel_variables.end(); ++it)
 	{
 		auto value = Json::Value(it->second);
 		crosslevel_variables_json[it->first] = value;
@@ -2477,7 +2479,11 @@ void ReadGameJson(const char *jsonString)
 	}
 
 	// Sarah: read crosslevel variables
-	auto crosslevel_variables = script_get_crosslevel_variables();
+
+	// This needs to be done here again because it gets blown away by freeing TAG_GAME
+	script_init();
+
+	std::unordered_map<std::string, std::string> crosslevel_variables;
 
 	const Json::Value& crosslevel_variables_json = json["script_crosslevel_variables"];
 
@@ -2487,8 +2493,10 @@ void ReadGameJson(const char *jsonString)
 		const char* key = it.memberName(&dummy);
 		const Json::Value& value = *it;
 
-		crosslevel_variables->insert_or_assign(key, value.asString());
+		crosslevel_variables.insert_or_assign(key, value.asString());
 	}
+
+	script_set_variables(crosslevel_variables, true);
 
 	G_PrecacheInventoryItems();
 }
@@ -2535,7 +2543,9 @@ char *WriteLevelJson(bool transition, size_t *out_size)
 	json["entities"] = std::move(entities);
 
 	// Sarah: write script global variables
-	auto global_variables = script_get_global_variables();
+	std::unordered_map<std::string, std::string> global_variables;
+
+	script_get_variables(global_variables);
 
 	Json::Value global_variables_json(Json::objectValue);
 
@@ -2636,7 +2646,7 @@ void ReadLevelJson(const char *jsonString)
 		global_variables.insert_or_assign(key, value.asString());
 	}
 
-	script_set_global_variables(global_variables);
+	script_set_variables(global_variables);
 
 	G_PrecacheInventoryItems();
 
