@@ -2419,20 +2419,20 @@ char *WriteGameJson(bool autosave, size_t *out_size)
 	}
 	json["clients"] = std::move(clients);
 
-	// Sarah: write crosslevel variables
-	std::unordered_map<std::string, std::string> crosslevel_variables;
+	// Sarah: write persistent variables
+	std::unordered_map<std::string, std::string> persistent_variables;
 
-	script_get_variables(crosslevel_variables, true);
+	script_get_variables(persistent_variables, true);
 
-	Json::Value crosslevel_variables_json(Json::objectValue);
+	Json::Value persistent_variables_json(Json::objectValue);
 
-	for (auto it = crosslevel_variables.begin(); it != crosslevel_variables.end(); ++it)
+	for (auto it = persistent_variables.begin(); it != persistent_variables.end(); ++it)
 	{
 		auto value = Json::Value(it->second);
-		crosslevel_variables_json[it->first] = value;
+		persistent_variables_json[it->first] = value;
 	}
 
-	json["script_crosslevel_variables"] = std::move(crosslevel_variables_json);
+	json["script_persistent_variables"] = std::move(persistent_variables_json);
 
 	return saveJson(json, out_size);
 }
@@ -2478,25 +2478,24 @@ void ReadGameJson(const char *jsonString)
 		json_pop_stack();
 	}
 
-	// Sarah: read crosslevel variables
-
-	// This needs to be done here again because it gets blown away by freeing TAG_GAME
+	// Sarah: This needs to be done here again because it gets blown away by freeing TAG_GAME
 	script_init();
 
-	std::unordered_map<std::string, std::string> crosslevel_variables;
+	// Sarah: read persistent variables
+	std::unordered_map<std::string, std::string> persistent_variables;
 
-	const Json::Value& crosslevel_variables_json = json["script_crosslevel_variables"];
+	const Json::Value& persistent_variables_json = json["script_persistent_variables"];
 
-	for (auto it = crosslevel_variables_json.begin(); it != crosslevel_variables_json.end(); ++it)
+	for (auto it = persistent_variables_json.begin(); it != persistent_variables_json.end(); ++it)
 	{
 		const char* dummy;
 		const char* key = it.memberName(&dummy);
 		const Json::Value& value = *it;
 
-		crosslevel_variables.insert_or_assign(key, value.asString());
+		persistent_variables.insert_or_assign(key, value.asString());
 	}
 
-	script_set_variables(crosslevel_variables, true);
+	script_set_variables(persistent_variables, true);
 
 	G_PrecacheInventoryItems();
 }
@@ -2542,20 +2541,20 @@ char *WriteLevelJson(bool transition, size_t *out_size)
 
 	json["entities"] = std::move(entities);
 
-	// Sarah: write script global variables
-	std::unordered_map<std::string, std::string> global_variables;
+	// Sarah: write script variables
+	std::unordered_map<std::string, std::string> script_variables;
 
-	script_get_variables(global_variables);
+	script_get_variables(script_variables);
 
-	Json::Value global_variables_json(Json::objectValue);
+	Json::Value script_variables_json(Json::objectValue);
 
-	for (auto it = global_variables.begin(); it != global_variables.end(); ++it)
+	for (auto it = script_variables.begin(); it != script_variables.end(); ++it)
 	{
 		auto value = Json::Value(it->second);
-		global_variables_json[it->first] = value;
+		script_variables_json[it->first] = value;
 	}
 
-	json["script_global_variables"] = std::move(global_variables_json);
+	json["script_variables"] = std::move(script_variables_json);
 
 	return saveJson(json, out_size);
 }
@@ -2633,20 +2632,20 @@ void ReadLevelJson(const char *jsonString)
 	}
 
 	// Sarah: read script variables
-	std::unordered_map<std::string, std::string> global_variables;
+	std::unordered_map<std::string, std::string> script_variables;
 
-	const Json::Value& global_variables_json = json["script_global_variables"];
+	const Json::Value& script_variables_json = json["script_variables"];
 
-	for (auto it = global_variables_json.begin(); it != global_variables_json.end(); ++it)
+	for (auto it = script_variables_json.begin(); it != script_variables_json.end(); ++it)
 	{
 		const char* dummy;
 		const char* key = it.memberName(&dummy);
 		const Json::Value& value = *it;
 
-		global_variables.insert_or_assign(key, value.asString());
+		script_variables.insert_or_assign(key, value.asString());
 	}
 
-	script_set_variables(global_variables);
+	script_set_variables(script_variables);
 
 	G_PrecacheInventoryItems();
 
