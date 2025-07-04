@@ -589,6 +589,8 @@ speed	default is 1000
 
 constexpr spawnflags_t SPAWNFLAG_BLASTER_NOTRAIL = 1_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_BLASTER_NOEFFECTS = 2_spawnflag;
+
+// Sarah: New spawnflags
 constexpr spawnflags_t SPAWNFLAG_BLASTER_SILENT = 4_spawnflag;
 
 USE(use_target_blaster) (edict_t *self, edict_t *other, edict_t *activator) -> void
@@ -602,31 +604,41 @@ USE(use_target_blaster) (edict_t *self, edict_t *other, edict_t *activator) -> v
 	else
 		effect = EF_BLASTER;
 
-	if (self->enemy && self->count == self->enemy->spawn_count)
+	// Sarah: shoot at target if it's still valid
+	if (self->enemy)
 	{
-		vec3_t dir = self->enemy->s.origin - self->s.origin;
-		dir.normalize();
+		if (self->count == self->enemy->spawn_count)
+		{
+			vec3_t dir = self->enemy->s.origin - self->s.origin;
+			dir.normalize();
 
-		fire_blaster(self, self->s.origin, dir, self->dmg, (int)self->speed, effect, MOD_TARGET_BLASTER);
+			fire_blaster(self, self->s.origin, dir, self->dmg, (int)self->speed, effect, MOD_TARGET_BLASTER);
+		}
+		else
+		{
+			self->enemy = nullptr;
+		}
 	}
 	else
 	{
 		fire_blaster(self, self->s.origin, self->movedir, self->dmg, (int)self->speed, effect, MOD_TARGET_BLASTER);
 	}
 
+	// Sarah: fire silently if spawnflag is set
 	if (!self->spawnflags.has(SPAWNFLAG_BLASTER_SILENT))
 	{
 		gi.sound(self, CHAN_VOICE, self->noise_index, 1, ATTN_NORM, 0);
 	}
 }
 
+// Sarah: find target
 THINK(blaster_find_target) (edict_t* self) -> void
 {
 	edict_t* ent = G_FindByString<&edict_t::targetname>(nullptr, self->target);
 
 	if (!ent)
 	{
-		gi.Com_PrintFmt("{}: {} is a bad target\n", *self, self->target);
+		gi.Com_PrintFmt("{}: target {} not found\n", *self, self->target);
 	}
 	else
 	{
@@ -646,6 +658,7 @@ void SP_target_blaster(edict_t *self)
 	if (!self->speed)
 		self->speed = 1000;
 
+	// Sarah: if a target is given, wait until next frame to find it
 	if (self->target)
 	{
 		self->think = blaster_find_target;

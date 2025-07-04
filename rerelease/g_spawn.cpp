@@ -218,8 +218,7 @@ void SP_info_ctf_teleport_destination(edict_t *self);
 void SP_monster_shambler(edict_t* self);
 
 // Sarah
-void SP_func_script(edict_t* self);
-void SP_func_button_scripted(edict_t* self);
+void SP_script(edict_t* self);
 void SP_trigger_enter_level(edict_t* self);
 void SP_path_track(edict_t* self);
 void SP_func_mover(edict_t* self);
@@ -443,8 +442,7 @@ static const std::initializer_list<spawn_t> spawns = {
 	{ "monster_shambler", SP_monster_shambler },
 
 	// Sarah
-	{ "func_script", SP_func_script },
-	{ "func_button_scripted", SP_func_button_scripted },
+	{ "script", SP_script },
 	{ "trigger_enter_level", SP_trigger_enter_level },
 	{ "path_track", SP_path_track },
 	{ "func_mover", SP_func_mover }

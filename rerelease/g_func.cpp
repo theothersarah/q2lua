@@ -1655,7 +1655,7 @@ THINK(Think_CalcMoveSpeed) (edict_t *self) -> void
 }
 
 // Sarah: if door trigger box is triggered, open the door
-// this should only be possible if the door has a pathtarget targeting a func_script,
+// this should only be possible if the door has a pathtarget targeting a script,
 // which then does something like other:trigger()
 USE(Use_DoorTrigger) (edict_t* self, edict_t* other, edict_t* activator) -> void
 {

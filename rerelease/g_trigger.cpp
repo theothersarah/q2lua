@@ -25,26 +25,26 @@ void InitTrigger(edict_t *self)
 	self->svflags = SVF_NOCLIENT;
 }
 
-// the wait time has passed, so set back up for another activation
-THINK(multi_wait) (edict_t *ent) -> void
-{
-	ent->nextthink = 0_ms;
-}
+// Sarah: removed trigger think function because it interferes with team movement and isn't necessary anyway
 
 // the trigger was just activated
 // ent->activator should be set to the activator so it can be held through a delay
 // so wait for the delay time before firing
 void multi_trigger(edict_t *ent)
 {
-	if (ent->nextthink)
-		return; // already been triggered
+	// Sarah: add debounce, this nextthink check also is useful because it prevents
+	// team moving triggers from triggering while moving
+	if (ent->nextthink || level.time < ent->touch_debounce_time)
+	{
+		return;
+	}
 
 	G_UseTargets(ent, ent->activator);
 
 	if (ent->wait > 0)
 	{
-		ent->think = multi_wait;
-		ent->nextthink = level.time + gtime_t::from_sec(ent->wait);
+		// Sarah: let's use debounce instead of nextthink
+		ent->touch_debounce_time = level.time + gtime_t::from_sec(ent->wait);
 	}
 	else
 	{ // we can't just remove (self) here, because this is a touch function
@@ -432,13 +432,16 @@ USE(trigger_counter_use) (edict_t *self, edict_t *other, edict_t *activator) -> 
 		gi.LocCenter_Print(activator, "$g_sequence_completed");
 		gi.sound(activator, CHAN_AUTO, gi.soundindex("misc/talk1.wav"), 1, ATTN_NORM, 0);
 	}
-	self->activator = activator;
-	multi_trigger(self);
+
+	// Sarah: changed multi_trigger() so we shouldn't call that here just in case
+	G_UseTargets(self, activator);
+
+	// As a consequence, it no longer deletes itself and can be reset by scripts
 }
 
 void SP_trigger_counter(edict_t *self)
 {
-	self->wait = -1;
+	// Sarah: removed wait value here because it's no longer used
 	if (!self->count)
 		self->count = 2;
 

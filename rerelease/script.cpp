@@ -66,8 +66,6 @@ static size_t script_stringpool_size;
 static size_t script_stringpool_count;
 
 // Compare function for bsearch and qsort for sorting strings by strcmp order
-// Annoyingly, Windows and Linux with glibc need different prototypes for this
-// search function because Windows doesn't just provide the normal version of
 static int script_stringpool_compare(const void* pa, const void* pb)
 {
 	const char* str1 = *((const char**)pa);
@@ -322,6 +320,10 @@ static int script_entity_set(lua_State* L)
 
 	switch (key)
 	{
+	case ENTITY_KEY_TARGETNAME:
+		ent->targetname = script_stringpool_add(lua_tostring(L, 3));
+		break;
+
 	case ENTITY_KEY_TARGET:
 		ent->target = script_stringpool_add(lua_tostring(L, 3));
 		break;
@@ -348,6 +350,10 @@ static int script_entity_set(lua_State* L)
 
 	case ENTITY_KEY_COMBATTARGET:
 		ent->combattarget = script_stringpool_add(lua_tostring(L, 3));
+		break;
+
+	case ENTITY_KEY_SCRIPT_FUNCTION:
+		ent->script_function = script_stringpool_add(lua_tostring(L, 3));
 		break;
 
 	case ENTITY_KEY_SCRIPT_ARG:
@@ -396,7 +402,7 @@ THINK(script_entity_trigger_delay) (edict_t* self) -> void
 
 	if (ent->spawn_count != self->count)
 	{
-		gi.Com_Print("func_script delayed trigger target no longer exists\n");
+		gi.Com_Print("script delayed trigger target no longer exists\n");
 	}
 	else if (ent->use)
 	{
@@ -404,7 +410,7 @@ THINK(script_entity_trigger_delay) (edict_t* self) -> void
 	}
 	else
 	{
-		gi.Com_Print("func_script delayed trigger target has no use function\n");
+		gi.Com_Print("script delayed trigger target has no use function\n");
 	}
 
 	G_FreeEdict(self);
@@ -437,7 +443,7 @@ static int script_entity_trigger(lua_State* L)
 	edict_t* activator = (edict_t*)lua_touserdata(L, -1);
 
 	// Also pop the arguments off the stack so the stack is empty during the trigger
-	// in case this directly or indirectly triggers another func_script
+	// in case this directly or indirectly triggers another script
 	lua_pop(L, 4 + nargs);
 
 	if (delay > 0)
@@ -457,7 +463,7 @@ static int script_entity_trigger(lua_State* L)
 		// Try to prevent an infinite loop
 		if (ent == self)
 		{
-			return luaL_argerror(L, 1, "func_script triggered itself with no delay");
+			return luaL_argerror(L, 1, "script triggered itself with no delay");
 		}
 
 		// Trigger it
@@ -531,7 +537,7 @@ THINK(script_entity_kill_delay) (edict_t* self) -> void
 
 	if (ent->spawn_count != self->count)
 	{
-		gi.Com_Print("func_script delayed kill target no longer exists\n");
+		gi.Com_Print("script delayed kill target no longer exists\n");
 	}
 	else
 	{
@@ -588,7 +594,7 @@ THINK(script_entity_message_delay) (edict_t* self) -> void
 
 	if (ent->spawn_count != self->count)
 	{
-		gi.Com_Print("func_script delayed message target no longer exists\n");
+		gi.Com_Print("script delayed message target no longer exists\n");
 	}
 	else
 	{
@@ -1104,9 +1110,9 @@ static const luaL_Reg script_entity_functions[] =
 	{"get", script_entity_get},
 	{"set", script_entity_set},
 	{"trigger", script_entity_trigger},
-	{"setstring", script_entity_setstring},
 	{"kill", script_entity_kill},
 	{"message", script_entity_message},
+	{"setstring", script_entity_setstring},
 	{"player", script_entity_player},
 	{"monster", script_entity_monster},
 	{"valid", script_entity_valid},
@@ -1195,8 +1201,6 @@ void script_init()
 	lua_pushcfunction(L, script_readonly);
 	lua_setfield(L, -2, "__newindex");
 	lua_pop(L, 1);
-
-	gi.Com_PrintFmt("Script initialized, stack size {}\n", lua_gettop(L));
 }
 
 // Load and execute a script for a given map
@@ -1264,7 +1268,6 @@ void script_load(const char* mapname)
 	lua_gc(L, LUA_GCCOLLECT);
 
 	gi.Com_PrintFmt("Loaded script for map {}\n", mapname);
-	gi.Com_PrintFmt("Script loaded, stack size {}\n", lua_gettop(L));
 
 	script_loaded = true;
 }
@@ -1346,7 +1349,6 @@ void script_get_variables(std::unordered_map<std::string, std::string>& variable
 	}
 
 	lua_pop(L, 1);
-	gi.Com_PrintFmt("Variables saved, stack size {}\n", lua_gettop(L));
 }
 
 // Set variables after loading
@@ -1410,19 +1412,24 @@ void script_set_variables(std::unordered_map<std::string, std::string>& variable
 	}
 
 	lua_pop(L, 1);
-	gi.Com_PrintFmt("Variables loaded, stack size {}\n", lua_gettop(L));
 }
 
 // =============================================================================
-// func_script entity
+// script entity
 // =============================================================================
 
-USE(func_script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
+USE(script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
 {
 	// Make sure script has been loaded for this level
 	if (!script_loaded)
 	{
 		gi.Com_PrintFmt("{} triggered but script not loaded\n", *self);
+		return;
+	}
+
+	if (!self->script_function)
+	{
+		gi.Com_PrintFmt("{} has no function set\n", *self);
 		return;
 	}
 
@@ -1478,18 +1485,9 @@ USE(func_script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
 	lua_pushnil(L);
 	lua_seti(L, -2, n + 1);
 	lua_pop(L, 1);
-	gi.Com_PrintFmt("Triggered, stack size {}\n", lua_gettop(L));
 }
 
-void SP_func_script(edict_t* self)
+void SP_script(edict_t* self)
 {
-	// Make sure the entity is set up correctly
-	if (!self->script_function)
-	{
-		gi.Com_PrintFmt("{} has no function set\n", *self);
-		G_FreeEdict(self);
-		return;
-	}
-
-	self->use = func_script_use;
+	self->use = script_use;
 }

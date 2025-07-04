@@ -2653,7 +2653,7 @@ constexpr spawnflags_t SPAWNFLAG_LANDMARK_KEEP_Z = 1_spawnflag;
 // ZOID
 
 // Sarah
-// func_script.c
+// script.cpp
 //
 
 void script_init();

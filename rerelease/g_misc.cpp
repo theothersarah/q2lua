@@ -1809,6 +1809,12 @@ USE(target_string_use) (edict_t *self, edict_t *other, edict_t *activator) -> vo
 	l = strlen(self->message);
 	for (e = self->teammaster; e; e = e->teamchain)
 	{
+		// Sarah: only act on target_characters
+		if (Q_strcasecmp(e->classname, "target_character") != 0)
+		{
+			continue;
+		}
+
 		if (!e->count)
 			continue;
 		n = e->count - 1;

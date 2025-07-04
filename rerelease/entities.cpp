@@ -1,121 +1,13 @@
 #include "g_local.h"
 
 // =============================================================================
-// func_button_scripted entity
-// =============================================================================
-
-void button_scripted_touch(edict_t* self, edict_t* other, const trace_t& tr, bool other_touching_self);
-void button_scripted_killed(edict_t* self, edict_t* inflictor, edict_t* attacker, int damage, const vec3_t& point, const mod_t& mod);
-
-USE(button_scripted_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
-{
-	if (!self->bmodel_anim.enabled)
-	{
-		if (level.is_n64)
-		{
-			self->s.frame = 0;
-		}
-		else
-		{
-			self->s.effects &= ~EF_ANIM23;
-		}
-
-		self->s.effects |= EF_ANIM01;
-	}
-	else
-	{
-		self->bmodel_anim.alternate = false;
-	}
-
-	if (self->health > 0)
-	{
-		self->die = button_scripted_killed;
-		self->takedamage = true;
-	}
-	else
-	{
-		self->touch = button_scripted_touch;
-	}
-
-	self->use = nullptr;
-}
-
-static void button_scripted_fire(edict_t* self)
-{
-	if (!self->bmodel_anim.enabled)
-	{
-		self->s.effects &= ~EF_ANIM01;
-		if (level.is_n64)
-		{
-			self->s.frame = 2;
-		}
-		else
-		{
-			self->s.effects |= EF_ANIM23;
-		}
-	}
-	else
-	{
-		self->bmodel_anim.alternate = true;
-	}
-
-	// Using this button will now reset it
-	self->use = button_scripted_use;
-
-	G_UseTargets(self, self->activator);
-}
-
-TOUCH(button_scripted_touch) (edict_t* self, edict_t* other, const trace_t& tr, bool other_touching_self) -> void
-{
-	if (!other->client)
-	{
-		return;
-	}
-
-	self->touch = nullptr;
-
-	self->activator = other;
-	button_scripted_fire(self);
-}
-
-DIE(button_scripted_killed) (edict_t* self, edict_t* inflictor, edict_t* attacker, int damage, const vec3_t& point, const mod_t& mod) -> void
-{
-	self->die = nullptr;
-
-	self->activator = attacker;
-	self->health = self->max_health;
-	self->takedamage = false;
-	button_scripted_fire(self);
-}
-
-void SP_func_button_scripted(edict_t* ent)
-{
-	ent->movetype = MOVETYPE_PUSH;
-	ent->solid = SOLID_BSP;
-	gi.setmodel(ent, ent->model);
-
-	if (!ent->bmodel_anim.enabled)
-	{
-		ent->s.effects |= EF_ANIM01;
-	}
-
-	if (ent->health > 0)
-	{
-		ent->max_health = ent->health;
-		ent->die = button_scripted_killed;
-		ent->takedamage = true;
-	}
-	else
-	{
-		ent->touch = button_scripted_touch;
-	}
-
-	gi.linkentity(ent);
-}
-
-// =============================================================================
 // trigger_enter_level entity
 // =============================================================================
+
+// This triggers every time a level is entered, not just for the first time like a
+// trigger_always. It functions like a target_crosslevel_target, including the way
+// it double-dips on the delay time, but it unconditionally triggers its targets
+// and doesn't delete itself.
 
 THINK(trigger_level_enter_think) (edict_t* self) -> void
 {
@@ -137,6 +29,9 @@ void SP_trigger_enter_level(edict_t* self)
 // path_track entity
 // =============================================================================
 
+// This is a path_corner without the monster-related stuff, so it doesn't have a touchable
+// hitbox.
+
 // Spawnflags:
 // 1 - Teleport
 
@@ -154,8 +49,18 @@ void SP_path_track(edict_t* self)
 // func_mover entity
 // =============================================================================
 
+// This is a point entity that functions almost exactly like a train. It can be used for
+// laser targets, etc., entities can be attached to it with the Move Teamchain spawnflag,
+// and it can optionally have a visible model assigned to it.
+
+constexpr spawnflags_t SPAWNFLAG_TRAIN_USE_ORIGIN = 32_spawnflag;
+
 void SP_func_mover(edict_t *self)
 {
+	// This flag has to be set since this entity only has an origin
+	self->spawnflags |= SPAWNFLAG_TRAIN_USE_ORIGIN;
+
+	// Train stuff
 	self->movetype = MOVETYPE_PUSH;
 
 	if (!self->speed)
@@ -168,6 +73,7 @@ void SP_func_mover(edict_t *self)
 
 	self->use = train_use;
 
+	// If this doesn't have a target there's nothing to do
 	if (self->target)
 	{
 		self->nextthink = level.time + FRAME_TIME_S;
@@ -179,6 +85,7 @@ void SP_func_mover(edict_t *self)
 		G_FreeEdict(self);
 	}
 
+	// Optionally display a model
 	if (self->model)
 	{
 		self->s.modelindex = gi.modelindex(self->model);
