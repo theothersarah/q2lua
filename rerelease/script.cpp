@@ -1,6 +1,6 @@
 #include "g_local.h"
 
-#include <lua.hpp>
+#include "lua/lua.hpp"
 
 // =============================================================================
 // Allocator for Lua memory
@@ -119,6 +119,138 @@ static const char* script_stringpool_add(const char* str)
 }
 
 // =============================================================================
+// Vector functions
+// =============================================================================
+
+// Creates a vector object at the top of the stack
+static void script_push_vector(lua_State* L, vec3_t& vec)
+{
+	vec3_t* ud = (vec3_t*)lua_newuserdatauv(L, sizeof(vec3_t), 0);
+
+	*ud = vec;
+
+	luaL_setmetatable(L, "script_vector");
+}
+
+// Add vectors
+static int script_vector_add(lua_State* L)
+{
+	vec3_t* vec1 = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
+	vec3_t* vec2 = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
+
+	vec3_t result = *vec1 + *vec2;
+
+	script_push_vector(L, result);
+
+	return 1;
+}
+
+// Subtract vectors
+static int script_vector_sub(lua_State* L)
+{
+	vec3_t* vec1 = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
+	vec3_t* vec2 = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
+
+	vec3_t result = *vec1 - *vec2;
+
+	script_push_vector(L, result);
+
+	return 1;
+}
+
+// Multiply a vector by a scalar
+static int script_vector_mul(lua_State* L)
+{
+	vec3_t* vec;
+	float number;
+
+	if (lua_type(L, 1) == LUA_TNUMBER)
+	{
+		number = luaL_checknumber(L, 1);
+		vec = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
+	}
+	else if (lua_type(L, 2) == LUA_TNUMBER)
+	{
+		vec = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
+		number = luaL_checknumber(L, 2);
+	}
+	else
+	{
+		return luaL_error(L, "vector can only be multiplied with a number");
+	}
+
+	vec3_t result = *vec * number;
+
+	script_push_vector(L, result);
+
+	return 1;
+}
+
+// Negate vector
+static int script_vector_neg(lua_State* L)
+{
+	vec3_t* vec = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
+
+	vec3_t result = *vec * -1;
+
+	script_push_vector(L, result);
+
+	return 1;
+}
+
+// Unit vector representing direction from this vector to another one
+static int script_vector_direction(lua_State* L)
+{
+	vec3_t* vec1 = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
+	vec3_t* vec2 = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
+
+	vec3_t result = (*vec2 - *vec1).normalized();
+
+	script_push_vector(L, result);
+
+	return 1;
+}
+
+// Distance between two vectors
+static int script_vector_distance(lua_State* L)
+{
+	vec3_t* vec1 = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
+	vec3_t* vec2 = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
+
+	float result = (*vec2 - *vec1).length();
+
+	lua_pushnumber(L, result);
+
+	return 1;
+}
+
+// Linearly interpolate between two vectors
+static int script_vector_lerp(lua_State* L)
+{
+	vec3_t* vec1 = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
+	vec3_t* vec2 = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
+	float fraction = luaL_checknumber(L, 3);
+
+	vec3_t result = *vec1 + (*vec2 - *vec1) * fraction;
+
+	script_push_vector(L, result);
+
+	return 1;
+}
+
+// Get the values of a vector
+static int script_vector_values(lua_State* L)
+{
+	vec3_t* vec = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
+
+	lua_pushnumber(L, vec->x);
+	lua_pushnumber(L, vec->y);
+	lua_pushnumber(L, vec->z);
+
+	return 3;
+}
+
+// =============================================================================
 // Entity functions
 // =============================================================================
 
@@ -162,6 +294,8 @@ static edict_t* script_check_entity(lua_State* L, int arg, bool error = true)
 
 // Valid entity keys for get, set, and find operations
 // All are valid for get, not all are valid for set or find
+// The enum and array of strings must be in precisely the same order;
+// the enum values are equal to the array index of the corresponding string
 enum script_entity_keys_index
 {
 	ENTITY_KEY_CLASSNAME,
@@ -177,6 +311,8 @@ enum script_entity_keys_index
 	ENTITY_KEY_SCRIPT_FUNCTION,
 	ENTITY_KEY_SCRIPT_ARG,
 	ENTITY_KEY_MESSAGE,
+	ENTITY_KEY_ORIGIN,
+	ENTITY_KEY_ANGLES,
 	ENTITY_KEY_DELAY,
 	ENTITY_KEY_WAIT,
 	ENTITY_KEY_SPEED,
@@ -202,6 +338,8 @@ static const char* script_entity_keys[] =
 	"script_function",
 	"script_arg",
 	"message",
+	"origin",
+	"angles",
 	"delay",
 	"wait",
 	"speed",
@@ -273,6 +411,14 @@ static int script_entity_get(lua_State* L)
 		lua_pushstring(L, ent->message);
 		break;
 
+	case ENTITY_KEY_ORIGIN:
+		script_push_vector(L, ent->s.origin);
+		break;
+
+	case ENTITY_KEY_ANGLES:
+		script_push_vector(L, ent->s.angles);
+		break;
+
 	case ENTITY_KEY_DELAY:
 		lua_pushnumber(L, ent->delay);
 		break;
@@ -306,7 +452,7 @@ static int script_entity_get(lua_State* L)
 		break;
 
 	default:
-		return luaL_error(L, "if you see this, Sarah fucked up");
+		return luaL_argerror(L, 2, "if you see this, Sarah fucked up");
 	}
 
 	return 1;
@@ -410,7 +556,7 @@ THINK(script_entity_trigger_delay) (edict_t* self) -> void
 	}
 	else
 	{
-		gi.Com_Print("script delayed trigger target has no use function\n");
+		gi.Com_Print("script delayed trigger target no longer has a use function\n");
 	}
 
 	G_FreeEdict(self);
@@ -429,6 +575,13 @@ static int script_entity_trigger(lua_State* L)
 	if (nargs > 1 && lua_type(L, 2) != LUA_TNIL)
 	{
 		delay = luaL_checknumber(L, 2);
+	}
+
+	// Check to make sure it can even be triggered
+	if (!ent->use)
+	{
+		const char* errstr = lua_pushfstring(L, "entity of type %s has no trigger function", ent->classname);
+		return luaL_argerror(L, 1, errstr);
 	}
 
 	// Get reference to self and activator from the top of the trigger stack
@@ -466,15 +619,7 @@ static int script_entity_trigger(lua_State* L)
 			return luaL_argerror(L, 1, "script triggered itself with no delay");
 		}
 
-		// Trigger it
-		if (ent->use)
-		{
-			ent->use(ent, self, activator);
-		}
-		else
-		{
-			return luaL_argerror(L, 1, "entity has no trigger function");
-		}
+		ent->use(ent, self, activator);
 	}
 
 	return 0;
@@ -565,7 +710,7 @@ static int script_entity_kill(lua_State* L)
 	// Make sure it's a player
 	if (ent->svflags & SVF_PLAYER)
 	{
-		return luaL_argerror(L, 1, "entity targeted by kill is a player");
+		return luaL_argerror(L, 1, "entity cannot be a player");
 	}
 
 	if (delay > 0)
@@ -623,7 +768,8 @@ static int script_entity_message(lua_State* L)
 	// Make sure it's a player
 	if (!(ent->svflags & SVF_PLAYER))
 	{
-		return luaL_argerror(L, 1, "entity targeted for message isn't a player");
+		const char* errstr = lua_pushfstring(L, "entity must be a player - is %s", ent->classname);
+		return luaL_argerror(L, 1, errstr);
 	}
 
 	if (delay > 0)
@@ -646,6 +792,93 @@ static int script_entity_message(lua_State* L)
 	return 0;
 }
 
+// Give an item to a player, returning true if it was accepted and false if it wasn't due to no inventory space
+static int script_entity_give(lua_State* L)
+{
+	edict_t* ent = script_check_entity(L, 1);
+	const char* name = luaL_checkstring(L, 2);
+
+	// Make sure it's a player
+	if (!(ent->svflags & SVF_PLAYER))
+	{
+		const char* errstr = lua_pushfstring(L, "entity must be a player - is %s", ent->classname);
+		return luaL_argerror(L, 1, errstr);
+	}
+
+	// Find the item
+	gitem_t* item = FindItemByClassname(name);
+
+	if (item == nullptr)
+	{
+		const char* errstr = lua_pushfstring(L, "invalid item classname %s", name);
+		return luaL_argerror(L, 2, errstr);
+	}
+
+	// Spawn it and give it to the player
+	edict_t* item_ent = G_Spawn();
+	item_ent->classname = item->classname;
+	SpawnItem(item_ent, item);
+
+	if (item_ent->inuse)
+	{
+		Touch_Item(item_ent, ent, null_trace, true);
+
+		// Check if it was accepted
+		if (item_ent->inuse)
+		{
+			G_FreeEdict(item_ent);
+			lua_pushboolean(L, 0);
+		}
+		else
+		{
+			lua_pushboolean(L, 1);
+		}
+	}
+
+	return 1;
+}
+
+//
+static int script_entity_heal(lua_State* L)
+{
+	edict_t* ent = script_check_entity(L, 1);
+
+	return 0;
+}
+
+//
+static int script_entity_damage(lua_State* L)
+{
+	edict_t* ent = script_check_entity(L, 1);
+
+	return 0;
+}
+
+// Change the noise of a target_speaker
+static int script_entity_setnoise(lua_State* L)
+{
+	edict_t* ent = script_check_entity(L, 1);
+	const char* sound = luaL_checkstring(L, 2);
+
+	// Make sure it's actually a target_speaker
+	if (Q_strcasecmp(ent->classname, "target_speaker"))
+	{
+		const char* errstr = lua_pushfstring(L, "entity must be a target_speaker - is %s", ent->classname);
+		return luaL_argerror(L, 1, errstr);
+	}
+
+	// Set the noise
+	ent->noise_index = gi.soundindex(sound);
+
+	// If it's an ambient sound that's currently active, change it
+	if (ent->s.sound)
+	{
+		ent->s.sound = ent->noise_index;
+	}
+
+	return 0;
+}
+
 // Special function for target_strings - set the displayed string without adding the value to the string pool
 // This is potentially beneficial because the string has no need to be stored and theoretically a lot of strings
 // could be generated if the number is changed often to a lot of different values
@@ -657,7 +890,8 @@ static int script_entity_setstring(lua_State* L)
 	// Make sure it's actually a target_string
 	if (Q_strcasecmp(ent->classname, "target_string"))
 	{
-		return luaL_argerror(L, 1, "entity must be a target_string");
+		const char* errstr = lua_pushfstring(L, "entity must be a target_string - is %s", ent->classname);
+		return luaL_argerror(L, 1, errstr);
 	}
 
 	// Setting the string to an empty string afterward does two things:
@@ -668,6 +902,16 @@ static int script_entity_setstring(lua_State* L)
 	ent->message = "";
 
 	return 0;
+}
+
+// Returns true if the entity can be damaged
+static int script_entity_damageable(lua_State* L)
+{
+	edict_t* ent = script_check_entity(L, 1);
+
+	lua_pushboolean(L, ent->takedamage);
+
+	return 1;
 }
 
 // Returns true if the entity is a player
@@ -721,6 +965,55 @@ static void script_push_entity(lua_State* L, edict_t* ent)
 // =============================================================================
 // API functions
 // =============================================================================
+
+// Create a new vector
+static int script_vector(lua_State* L)
+{
+	vec3_t vec = {};
+
+	vec.x = luaL_checknumber(L, 1);
+	vec.y = luaL_checknumber(L, 2);
+	vec.z = luaL_checknumber(L, 3);
+
+	script_push_vector(L, vec);
+
+	return 1;
+}
+
+// Spawn an entity with a given position and optionally angle
+static int script_spawn(lua_State* L)
+{
+	const char* classname = luaL_checkstring(L, 1);
+	vec3_t* origin = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
+
+	int nargs = lua_gettop(L);
+
+	vec3_t angles = {};
+
+	if (nargs > 2 && lua_type(L, 3) != LUA_TNIL)
+	{
+		angles = *(vec3_t*)luaL_checkudata(L, 3, "script_vector");
+	}
+
+	edict_t* ent = G_Spawn();
+	ent->classname = classname;
+	ent->s.origin = *origin;
+	ent->s.angles = angles;
+	st = {};
+
+	ent->monsterinfo.aiflags |= AI_DO_NOT_COUNT;
+
+	ED_CallSpawn(ent);
+	gi.linkentity(ent);
+
+	KillBox(ent, false);
+
+	ent->s.renderfx |= RF_IR_VISIBLE;
+
+	script_push_entity(L, ent);
+
+	return 1;
+}
 
 // This is equivalent to the old G_Find except the logic skips worldspawn,
 // not as a purposeful feature but because it worked out like that and I
@@ -974,7 +1267,11 @@ static int script_vars_get(lua_State* L)
 // __newindex metamethod for vars
 static int script_vars_set(lua_State* L)
 {
-	luaL_checktype(L, 2, LUA_TSTRING);
+	if (lua_type(L, 2) != LUA_TSTRING)
+	{
+		return luaL_error(L, "invalid key for script variable: must be string");
+	}
+
 	int type = lua_type(L, 3);
 
 	if (type == LUA_TNIL || type == LUA_TNUMBER || type == LUA_TBOOLEAN || type == LUA_TSTRING || type == LUA_TUSERDATA)
@@ -985,7 +1282,7 @@ static int script_vars_set(lua_State* L)
 	}
 	else
 	{
-		return luaL_argerror(L, 3, "invalid type: must be nil, number, boolean, string, or entity");
+		return luaL_error(L, "invalid type for script variable: must be nil, number, boolean, string, vector, or entity");
 	}
 
 	return 0;
@@ -994,7 +1291,11 @@ static int script_vars_set(lua_State* L)
 // __newindex metamethod for persistent (doesn't need a function for __index because it will be a table)
 static int script_persistent_set(lua_State* L)
 {
-	luaL_checktype(L, 2, LUA_TSTRING);
+	if (lua_type(L, 2) != LUA_TSTRING)
+	{
+		return luaL_error(L, "invalid key for persistent variable: must be string");
+	}
+
 	int type = lua_type(L, 3);
 
 	if (type == LUA_TNIL || type == LUA_TNUMBER || type == LUA_TBOOLEAN || type == LUA_TSTRING)
@@ -1005,7 +1306,7 @@ static int script_persistent_set(lua_State* L)
 	}
 	else
 	{
-		return luaL_argerror(L, 3, "invalid type: must be nil, number, boolean, or string");
+		return luaL_error(L, "invalid type for persistent variable: must be nil, number, boolean, or string");
 	}
 
 	return 0;
@@ -1022,6 +1323,9 @@ static int script_readonly(lua_State* L)
 // and __newindex metamethods, we can't just add a metamethod to the existing table
 static void script_table_readonly(lua_State* L, bool recursive = false)
 {
+	// Make sure there's space since this can be recursive and puts a lot on the stack
+	lua_checkstack(L, 2);
+
 	// Walk the table to find tables within it
 	if (recursive)
 	{
@@ -1067,13 +1371,20 @@ static int script_globals_get(lua_State* L)
 // __newindex metamethod for globals during setup
 static int script_globals_set(lua_State* L)
 {
-	const char* name = luaL_checkstring(L, 2);
+	if (lua_type(L, 2) != LUA_TSTRING)
+	{
+		return luaL_error(L, "invalid key for global variable: must be string");
+	}
+
+	lua_pushliteral(L, "script");
 
 	// Make sure the object doesn't have the name "script"
-	if (strcmp(name, "script") == 0)
+	if (lua_rawequal(L, 2, -1))
 	{
-		return luaL_argerror(L, 2, "name cannot be 'script'");
+		return luaL_error(L, "name for global variable cannot be 'script'");
 	}
+
+	lua_pop(L, 1);
 
 	// Make sure the name hasn't been used yet
 	lua_getfield(L, LUA_REGISTRYINDEX, "script_globals");
@@ -1081,12 +1392,12 @@ static int script_globals_set(lua_State* L)
 
 	if (lua_rawget(L, -2) != LUA_TNIL)
 	{
-		return luaL_argerror(L, 2, "used existing name");
+		return luaL_error(L, "global variable being added has the same name as an existing variable");
 	}
 
 	lua_pop(L, 2);
 
-	// Set the table and all within it to read-only
+	// If it's a table, set it and all tables within it to read-only
 	if (lua_type(L, 3) == LUA_TTABLE)
 	{
 		script_table_readonly(L, true);
@@ -1104,6 +1415,28 @@ static int script_globals_set(lua_State* L)
 // Script initialization and loading
 // =============================================================================
 
+// Vector metamethods
+static const luaL_Reg script_vector_metamethods[] =
+{
+	{"__add", script_vector_add},
+	{"__sub", script_vector_sub},
+	{"__mul", script_vector_mul},
+	{"__unm", script_vector_neg},
+	{"__index", nullptr},
+	{"__newindex", script_readonly},
+	{nullptr, nullptr}
+};
+
+// Vector member functions
+static const luaL_Reg script_vector_functions[] =
+{
+	{"direction", script_vector_direction},
+	{"distance", script_vector_distance},
+	{"lerp", script_vector_lerp},
+	{"values", script_vector_values},
+	{nullptr, nullptr}
+};
+
 // Entity member functions
 static const luaL_Reg script_entity_functions[] =
 {
@@ -1112,7 +1445,10 @@ static const luaL_Reg script_entity_functions[] =
 	{"trigger", script_entity_trigger},
 	{"kill", script_entity_kill},
 	{"message", script_entity_message},
+	{"give", script_entity_give},
+	{"setnoise", script_entity_setnoise},
 	{"setstring", script_entity_setstring},
+	{"damageable", script_entity_damageable},
 	{"player", script_entity_player},
 	{"monster", script_entity_monster},
 	{"valid", script_entity_valid},
@@ -1122,6 +1458,8 @@ static const luaL_Reg script_entity_functions[] =
 // API functions
 static const luaL_Reg script_functions[] =
 {
+	{"vector", script_vector},
+	{"spawn", script_spawn},
 	{"find", script_find},
 	{"foreach", script_foreach},
 	{"filter", script_filter},
@@ -1129,6 +1467,14 @@ static const luaL_Reg script_functions[] =
 	{"values", script_values},
 	{nullptr, nullptr}
 };
+
+// Panic function which should hopefully never happen
+static int script_panic(lua_State* L)
+{
+	const char* errstr = lua_tostring(L, -1);
+	gi.Com_ErrorFmt("Script panic: {}\n", errstr);
+	return 0;
+}
 
 // Lua instance has a lifetime of TAG_GAME
 static lua_State* L;
@@ -1147,6 +1493,9 @@ void script_init()
 	// It's okay not to check if this fails, because that would only be caused by an out of memory error
 	// and the allocators have error handling
 	L = lua_newstate(script_lua_allocator, nullptr);
+
+	// Set panic function
+	lua_atpanic(L, script_panic);
 
 	// Create table for API and assign functions to it
 	luaL_newlib(L, script_functions);
@@ -1194,6 +1543,13 @@ void script_init()
 	// Add API to the registry so it can be retrieved after a script is loaded
 	lua_setfield(L, LUA_REGISTRYINDEX, "script_api");
 
+	// Create metatable for vector objects
+	luaL_newmetatable(L, "script_vector");
+	luaL_setfuncs(L, script_vector_metamethods, 0);
+	luaL_newlib(L, script_vector_functions);
+	lua_setfield(L, -2, "__index");
+	lua_pop(L, 1);
+
 	// Create metatable for entity objects
 	luaL_newmetatable(L, "script_entity");
 	luaL_newlib(L, script_entity_functions);
@@ -1227,6 +1583,9 @@ void script_load(const char* mapname)
 	lua_getfield(L, LUA_REGISTRYINDEX, "script_api");
 	lua_setfield(L, -2, "script");
 	lua_setfield(L, LUA_REGISTRYINDEX, "script_globals");
+
+	// May as well run a full garbage-collection cycle here
+	lua_gc(L, LUA_GCCOLLECT);
 
 	// Add a setup metatable to the global proxy table
 	lua_rawgeti(L, LUA_REGISTRYINDEX, LUA_RIDX_GLOBALS);
@@ -1263,9 +1622,6 @@ void script_load(const char* mapname)
 	lua_setfield(L, -2, "__newindex");
 	lua_setmetatable(L, -2);
 	lua_pop(L, 1);
-
-	// May as well run a full garbage-collection cycle here
-	lua_gc(L, LUA_GCCOLLECT);
 
 	gi.Com_PrintFmt("Loaded script for map {}\n", mapname);
 
@@ -1322,18 +1678,42 @@ void script_get_variables(std::unordered_map<std::string, std::string>& variable
 
 		if (type == LUA_TUSERDATA)
 		{
-			val += "entity:";
+			luaL_getmetafield(L, -2, "__name");
+			std::string_view name = lua_tostring(L, -1);
 
-			struct script_ud_ent_t* ud = (script_ud_ent_t*)lua_touserdata(L, -2);
-
-			if (!ud->ent->inuse || ud->ent->spawn_count != ud->spawn_count)
+			if (name == "script_vector")
 			{
-				val += "-1";
+				vec3_t* vector = (vec3_t*)lua_touserdata(L, -3);
+
+				val += "vector:";
+
+				val += std::to_string(vector->x);
+				val += ",";
+				val += std::to_string(vector->y);
+				val += ",";
+				val += std::to_string(vector->z);
+			}
+			else if (name == "script_entity")
+			{
+				struct script_ud_ent_t* ud = (script_ud_ent_t*)lua_touserdata(L, -3);
+
+				val += "entity:";
+
+				if (!ud->ent->inuse || ud->ent->spawn_count != ud->spawn_count)
+				{
+					val += "-1";
+				}
+				else
+				{
+					val += std::to_string(ud->ent - g_edicts);
+				}
 			}
 			else
 			{
-				val += std::to_string(ud->ent - g_edicts);
+				gi.Com_ErrorFmt("script attempting to save unknown uservalue type {}\n", name);
 			}
+
+			lua_pop(L, 1);
 		}
 		else
 		{
@@ -1368,6 +1748,8 @@ void script_set_variables(std::unordered_map<std::string, std::string>& variable
 	{
 		std::string key = it->first;
 		std::string str = it->second;
+
+		//
 		size_t loc = str.find_first_of(':');
 		std::string str_type = str.substr(0, loc);
 		std::string str_val = str.substr(loc + 1);
@@ -1381,6 +1763,18 @@ void script_set_variables(std::unordered_map<std::string, std::string>& variable
 		else if (str_type == "boolean")
 		{
 			lua_pushboolean(L, str_val == "true");
+		}
+		else if (str_type == "vector")
+		{
+			size_t loc1 = str_val.find_first_of(',');
+			size_t loc2 = str_val.find_first_of(',', loc1 + 1);
+
+			vec3_t vec = {};
+			vec.x = std::stof(str_val.substr(0, loc1));
+			vec.y = std::stof(str_val.substr(loc1 + 1, loc2));
+			vec.z = std::stof(str_val.substr(loc2 + 1));
+
+			script_push_vector(L, vec);
 		}
 		else if (str_type == "entity")
 		{

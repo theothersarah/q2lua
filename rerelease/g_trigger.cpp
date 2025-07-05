@@ -412,8 +412,11 @@ constexpr spawnflags_t SPAWNFLAG_COUNTER_NOMESSAGE = 1_spawnflag;
 
 USE(trigger_counter_use) (edict_t *self, edict_t *other, edict_t *activator) -> void
 {
-	if (self->count == 0)
+	// Sarah: changed condition so it's still disabled if it ends up on a negative number
+	if (self->count <= 0)
+	{
 		return;
+	}
 
 	self->count--;
 
@@ -433,10 +436,9 @@ USE(trigger_counter_use) (edict_t *self, edict_t *other, edict_t *activator) -> 
 		gi.sound(activator, CHAN_AUTO, gi.soundindex("misc/talk1.wav"), 1, ATTN_NORM, 0);
 	}
 
-	// Sarah: changed multi_trigger() so we shouldn't call that here just in case
-	G_UseTargets(self, activator);
-
+	// Sarah: changed multi_trigger() but we should just trigger things normally anyway
 	// As a consequence, it no longer deletes itself and can be reset by scripts
+	G_UseTargets(self, activator);
 }
 
 void SP_trigger_counter(edict_t *self)
