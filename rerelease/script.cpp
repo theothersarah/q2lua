@@ -132,11 +132,17 @@ static void script_push_vector(lua_State* L, vec3_t& vec)
 	luaL_setmetatable(L, "script_vector");
 }
 
+// Check if an argument is a vector, and return a pointer to it
+static vec3_t* script_check_vector(lua_State* L, int arg)
+{
+	return (vec3_t*)luaL_checkudata(L, arg, "script_vector");
+}
+
 // Add vectors
 static int script_vector_add(lua_State* L)
 {
-	vec3_t* vec1 = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
-	vec3_t* vec2 = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
+	vec3_t* vec1 = script_check_vector(L, 1);
+	vec3_t* vec2 = script_check_vector(L, 2);
 
 	vec3_t result = *vec1 + *vec2;
 
@@ -148,8 +154,8 @@ static int script_vector_add(lua_State* L)
 // Subtract vectors
 static int script_vector_sub(lua_State* L)
 {
-	vec3_t* vec1 = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
-	vec3_t* vec2 = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
+	vec3_t* vec1 = script_check_vector(L, 1);
+	vec3_t* vec2 = script_check_vector(L, 2);
 
 	vec3_t result = *vec1 - *vec2;
 
@@ -167,11 +173,11 @@ static int script_vector_mul(lua_State* L)
 	if (lua_type(L, 1) == LUA_TNUMBER)
 	{
 		number = luaL_checknumber(L, 1);
-		vec = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
+		vec = script_check_vector(L, 2);
 	}
 	else if (lua_type(L, 2) == LUA_TNUMBER)
 	{
-		vec = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
+		vec = script_check_vector(L, 1);
 		number = luaL_checknumber(L, 2);
 	}
 	else
@@ -189,7 +195,7 @@ static int script_vector_mul(lua_State* L)
 // Negate vector
 static int script_vector_neg(lua_State* L)
 {
-	vec3_t* vec = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
+	vec3_t* vec = script_check_vector(L, 1);
 
 	vec3_t result = *vec * -1;
 
@@ -198,13 +204,42 @@ static int script_vector_neg(lua_State* L)
 	return 1;
 }
 
+// Get a string representation for writing to save files
+static int script_vector_tostring(lua_State* L)
+{
+	vec3_t* vec = script_check_vector(L, 1);
+
+	lua_pushfstring(L, "vector:%f,%f,%f", vec->x, vec->y, vec->z);
+
+	return 1;
+}
+
+// Get the components of a vector
+static int script_vector_components(lua_State* L)
+{
+	vec3_t* vec = script_check_vector(L, 1);
+
+	lua_pushnumber(L, vec->x);
+	lua_pushnumber(L, vec->y);
+	lua_pushnumber(L, vec->z);
+
+	return 3;
+}
+
 // Unit vector representing direction from this vector to another one
+// If an optional third argument evaluates as true, returns angles instead
 static int script_vector_direction(lua_State* L)
 {
-	vec3_t* vec1 = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
-	vec3_t* vec2 = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
+	vec3_t* vec1 = script_check_vector(L, 1);
+	vec3_t* vec2 = script_check_vector(L, 2);
+	bool angles = lua_toboolean(L, 3);
 
 	vec3_t result = (*vec2 - *vec1).normalized();
+
+	if (angles)
+	{
+		result = vectoangles(result);
+	}
 
 	script_push_vector(L, result);
 
@@ -214,8 +249,8 @@ static int script_vector_direction(lua_State* L)
 // Distance between two vectors
 static int script_vector_distance(lua_State* L)
 {
-	vec3_t* vec1 = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
-	vec3_t* vec2 = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
+	vec3_t* vec1 = script_check_vector(L, 1);
+	vec3_t* vec2 = script_check_vector(L, 2);
 
 	float result = (*vec2 - *vec1).length();
 
@@ -227,8 +262,8 @@ static int script_vector_distance(lua_State* L)
 // Linearly interpolate between two vectors
 static int script_vector_lerp(lua_State* L)
 {
-	vec3_t* vec1 = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
-	vec3_t* vec2 = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
+	vec3_t* vec1 = script_check_vector(L, 1);
+	vec3_t* vec2 = script_check_vector(L, 2);
 	float fraction = luaL_checknumber(L, 3);
 
 	vec3_t result = *vec1 + (*vec2 - *vec1) * fraction;
@@ -236,18 +271,6 @@ static int script_vector_lerp(lua_State* L)
 	script_push_vector(L, result);
 
 	return 1;
-}
-
-// Get the values of a vector
-static int script_vector_values(lua_State* L)
-{
-	vec3_t* vec = (vec3_t*)luaL_checkudata(L, 1, "script_vector");
-
-	lua_pushnumber(L, vec->x);
-	lua_pushnumber(L, vec->y);
-	lua_pushnumber(L, vec->z);
-
-	return 3;
 }
 
 // =============================================================================
@@ -290,6 +313,23 @@ static edict_t* script_check_entity(lua_State* L, int arg, bool error = true)
 	}
 
 	return ent;
+}
+
+// Get a string representation for writing to save files
+static int script_entity_tostring(lua_State* L)
+{
+	edict_t* ent = script_check_entity(L, 1, false);
+
+	int index = -1;
+
+	if (ent != nullptr)
+	{
+		index = ent - g_edicts;
+	}
+
+	lua_pushfstring(L, "entity:%d", index);
+
+	return 1;
 }
 
 // Valid entity keys for get, set, and find operations
@@ -466,10 +506,6 @@ static int script_entity_set(lua_State* L)
 
 	switch (key)
 	{
-	case ENTITY_KEY_TARGETNAME:
-		ent->targetname = script_stringpool_add(lua_tostring(L, 3));
-		break;
-
 	case ENTITY_KEY_TARGET:
 		ent->target = script_stringpool_add(lua_tostring(L, 3));
 		break;
@@ -510,6 +546,15 @@ static int script_entity_set(lua_State* L)
 		ent->message = script_stringpool_add(lua_tostring(L, 3));
 		break;
 
+	case ENTITY_KEY_ORIGIN:
+		ent->s.origin = *script_check_vector(L, 3);
+		gi.linkentity(ent);
+		break;
+
+	case ENTITY_KEY_ANGLES:
+		ent->s.angles = *script_check_vector(L, 3);
+		break;
+
 	case ENTITY_KEY_DELAY:
 		ent->delay = luaL_checknumber(L, 3);
 		break;
@@ -542,7 +587,7 @@ static int script_entity_set(lua_State* L)
 }
 
 // Function for delayed trigger temporary entity
-THINK(script_entity_trigger_delay) (edict_t* self) -> void
+static THINK(script_entity_trigger_delay) (edict_t* self) -> void
 {
 	edict_t* ent = self->target_ent;
 
@@ -566,16 +611,7 @@ THINK(script_entity_trigger_delay) (edict_t* self) -> void
 static int script_entity_trigger(lua_State* L)
 {
 	edict_t* ent = script_check_entity(L, 1);
-
-	int nargs = lua_gettop(L);
-
-	// Second argument is an optional delay
-	float delay = -1;
-
-	if (nargs > 1 && lua_type(L, 2) != LUA_TNIL)
-	{
-		delay = luaL_checknumber(L, 2);
-	}
+	float delay = luaL_optnumber(L, 2, 0);
 
 	// Check to make sure it can even be triggered
 	if (!ent->use)
@@ -595,9 +631,10 @@ static int script_entity_trigger(lua_State* L)
 	lua_getfield(L, -2, "activator");
 	edict_t* activator = (edict_t*)lua_touserdata(L, -1);
 
-	// Also pop the arguments off the stack so the stack is empty during the trigger
-	// in case this directly or indirectly triggers another script
-	lua_pop(L, 4 + nargs);
+	// Pop everything off the stack so it is empty during the trigger
+	// in case this directly or indirectly triggers another script,
+	// to prevent the stack from overflowing after repeated triggers
+	lua_settop(L, 0);
 
 	if (delay > 0)
 	{
@@ -628,55 +665,9 @@ static int script_entity_trigger(lua_State* L)
 // Kills the entity, same as killtarget on a trigger, meaning it outright deletes the entity
 // Note that monsters are sent directly to the shadow realm without playing death animations
 // or leaving a corpse
-void G_MonsterKilled(edict_t* self);
-
-static void script_entity_do_kill(edict_t* ent)
-{
-	if (ent->teammaster)
-	{
-		if (ent->flags & FL_TEAMSLAVE)
-		{
-			for (edict_t* master = ent->teammaster; master; master = master->teamchain)
-			{
-				if (master->teamchain == ent)
-				{
-					master->teamchain = ent->teamchain;
-					break;
-				}
-			}
-		}
-		else if (ent->flags & FL_TEAMMASTER)
-		{
-			ent->teammaster->flags &= ~FL_TEAMMASTER;
-
-			edict_t* new_master = ent->teammaster->teamchain;
-
-			if (new_master)
-			{
-				new_master->flags |= FL_TEAMMASTER;
-				new_master->flags &= ~FL_TEAMSLAVE;
-
-				for (edict_t* m = new_master; m; m = m->teamchain)
-				{
-					m->teammaster = new_master;
-				}
-			}
-		}
-	}
-
-	if (ent->svflags & SVF_MONSTER)
-	{
-		if (!ent->deadflag && !(ent->monsterinfo.aiflags & AI_DO_NOT_COUNT) && !(ent->spawnflags & SPAWNFLAG_MONSTER_DEAD))
-		{
-			G_MonsterKilled(ent);
-		}
-	}
-
-	G_FreeEdict(ent);
-}
 
 // Function for delayed kill temporary entity
-THINK(script_entity_kill_delay) (edict_t* self) -> void
+static THINK(script_entity_kill_delay) (edict_t* self) -> void
 {
 	edict_t* ent = self->target_ent;
 
@@ -686,7 +677,7 @@ THINK(script_entity_kill_delay) (edict_t* self) -> void
 	}
 	else
 	{
-		script_entity_do_kill(ent);
+		G_Kill(ent);
 	}
 
 	G_FreeEdict(self);
@@ -696,16 +687,7 @@ THINK(script_entity_kill_delay) (edict_t* self) -> void
 static int script_entity_kill(lua_State* L)
 {
 	edict_t* ent = script_check_entity(L, 1);
-
-	int nargs = lua_gettop(L);
-
-	// Second argument is an optional delay
-	float delay = -1;
-
-	if (nargs > 1 && lua_type(L, 2) != LUA_TNIL)
-	{
-		delay = luaL_checknumber(L, 2);
-	}
+	float delay = luaL_optnumber(L, 2, 0);
 
 	// Make sure it's a player
 	if (ent->svflags & SVF_PLAYER)
@@ -725,7 +707,7 @@ static int script_entity_kill(lua_State* L)
 	}
 	else
 	{
-		script_entity_do_kill(ent);
+		G_Kill(ent);
 	}
 
 	return 0;
@@ -733,7 +715,7 @@ static int script_entity_kill(lua_State* L)
 
 // If the entity is a player, display a message on their screen instantly or after a delay
 // This uses the same style and sound as trigger messages
-THINK(script_entity_message_delay) (edict_t* self) -> void
+static THINK(script_entity_message_delay) (edict_t* self) -> void
 {
 	edict_t* ent = self->target_ent;
 
@@ -754,16 +736,7 @@ static int script_entity_message(lua_State* L)
 {
 	edict_t* ent = script_check_entity(L, 1);
 	const char* message = luaL_checkstring(L, 2);
-
-	int nargs = lua_gettop(L);
-
-	// Third argument is an optional delay
-	float delay = -1;
-
-	if (nargs > 2 && lua_type(L, 3) != LUA_TNIL)
-	{
-		delay = luaL_checknumber(L, 3);
-	}
+	float delay = luaL_optnumber(L, 3, 0);
 
 	// Make sure it's a player
 	if (!(ent->svflags & SVF_PLAYER))
@@ -838,18 +811,68 @@ static int script_entity_give(lua_State* L)
 	return 1;
 }
 
-//
+// Heal the entity
 static int script_entity_heal(lua_State* L)
 {
 	edict_t* ent = script_check_entity(L, 1);
+	int health = luaL_checkinteger(L, 2);
+	bool overheal = lua_toboolean(L, 3);
+
+	if (!(ent->svflags & SVF_PLAYER) && !(ent->svflags & SVF_MONSTER))
+	{
+		const char* errstr = lua_pushfstring(L, "entity must be player or monster - is %s", ent->classname);
+		return luaL_argerror(L, 1, errstr);
+	}
+
+	if (ent->deadflag)
+	{
+		return luaL_argerror(L, 1, "target entity must be alive");
+	}
+
+	if (health <= 0)
+	{
+		return luaL_argerror(L, 2, "healing must be greater than 0");
+	}
+
+	ent->health += health;
+
+	if (!overheal && ent->health > ent->max_health)
+	{
+		ent->health = ent->max_health;
+	}
+
+	if (ent->monsterinfo.setskin)
+	{
+		ent->monsterinfo.setskin(ent);
+	}
 
 	return 0;
 }
 
-//
+// Damage the entity
 static int script_entity_damage(lua_State* L)
 {
 	edict_t* ent = script_check_entity(L, 1);
+	int damage = luaL_checkinteger(L, 2);
+	edict_t* from = luaL_opt(L, script_check_entity, 3, nullptr);
+
+	if (damage <= 0)
+	{
+		return luaL_argerror(L, 2, "damage must be greater than 0");
+	}
+
+	if (!ent->takedamage)
+	{
+		const char* errstr = lua_pushfstring(L, "entity cannot be damaged - is %s", ent->classname);
+		return luaL_argerror(L, 1, errstr);
+	}
+
+	if (from == nullptr)
+	{
+		from = ent;
+	}
+
+	T_Damage(ent, from, from, vec3_origin, ent->s.origin, vec3_origin, damage, damage, DAMAGE_NO_PROTECTION, MOD_TRIGGER_HURT);
 
 	return 0;
 }
@@ -904,8 +927,18 @@ static int script_entity_setstring(lua_State* L)
 	return 0;
 }
 
+// Returns true if the entity is dead
+static int script_entity_dead(lua_State* L)
+{
+	edict_t* ent = script_check_entity(L, 1);
+
+	lua_pushboolean(L, ent->deadflag);
+
+	return 1;
+}
+
 // Returns true if the entity can be damaged
-static int script_entity_damageable(lua_State* L)
+static int script_entity_takedamage(lua_State* L)
 {
 	edict_t* ent = script_check_entity(L, 1);
 
@@ -966,6 +999,73 @@ static void script_push_entity(lua_State* L, edict_t* ent)
 // API functions
 // =============================================================================
 
+// Spawn a new entity
+static int script_spawn(lua_State* L)
+{
+	luaL_checktype(L, 1, LUA_TTABLE);
+	vec3_t* origin = luaL_opt(L, script_check_vector, 2, nullptr);
+	vec3_t* angles = luaL_opt(L, script_check_vector, 3, nullptr);
+
+	// Spawn the entity
+	edict_t* ent = G_Spawn();
+
+	// Set origin and angles if they were provided
+	if (origin != nullptr)
+	{
+		ent->s.origin = *origin;
+	}
+
+	if (angles != nullptr)
+	{
+		ent->s.angles = *angles;
+	}
+
+	// Read-only tables are empty proxies, so instead operate on the table for the __index metamethod if one exists
+	int type = luaL_getmetafield(L, 1, "__index");
+
+	int idx = 1;
+
+	if (type != LUA_TNIL)
+	{
+		if (type == LUA_TTABLE)
+		{
+			idx = -2;
+		}
+		else
+		{
+			lua_pop(L, 1);
+		}
+	}
+
+	// Iterate through the properties table
+	lua_pushnil(L);
+
+	while (lua_next(L, idx) != 0)
+	{
+		const char* key = luaL_tolstring(L, -2, nullptr);
+		const char* value = luaL_tolstring(L, -2, nullptr);
+
+		ED_ParseField(key, value, ent);
+
+		lua_pop(L, 3);
+	}
+
+	// Call the spawn function for the entity
+	ED_CallSpawn(ent);
+
+	// If the entity still exists, return it; otherwise, return nil
+	if (ent->inuse)
+	{
+		script_push_entity(L, ent);
+	}
+	else
+	{
+		lua_pushnil(L);
+	}
+
+	return 1;
+}
+
 // Create a new vector
 static int script_vector(lua_State* L)
 {
@@ -980,50 +1080,15 @@ static int script_vector(lua_State* L)
 	return 1;
 }
 
-// Spawn an entity with a given position and optionally angle
-static int script_spawn(lua_State* L)
-{
-	const char* classname = luaL_checkstring(L, 1);
-	vec3_t* origin = (vec3_t*)luaL_checkudata(L, 2, "script_vector");
-
-	int nargs = lua_gettop(L);
-
-	vec3_t angles = {};
-
-	if (nargs > 2 && lua_type(L, 3) != LUA_TNIL)
-	{
-		angles = *(vec3_t*)luaL_checkudata(L, 3, "script_vector");
-	}
-
-	edict_t* ent = G_Spawn();
-	ent->classname = classname;
-	ent->s.origin = *origin;
-	ent->s.angles = angles;
-	st = {};
-
-	ent->monsterinfo.aiflags |= AI_DO_NOT_COUNT;
-
-	ED_CallSpawn(ent);
-	gi.linkentity(ent);
-
-	KillBox(ent, false);
-
-	ent->s.renderfx |= RF_IR_VISIBLE;
-
-	script_push_entity(L, ent);
-
-	return 1;
-}
-
-// This is equivalent to the old G_Find except the logic skips worldspawn,
-// not as a purposeful feature but because it worked out like that and I
-// like this logic better
+// This is equivalent to the old G_Find except it skips worldspawn, the players, and the body queue
 static edict_t* script_find_offset(edict_t* from, size_t value_offset, const char* value)
 {
 	// If from is null, start from the beginning
 	if (from == nullptr)
 	{
-		from = g_edicts;
+		// Skip worldspawn, the players, and the body queue
+		// This points to the last body queue slot but it late gets preincremented by the loop
+		from = g_edicts + game.maxclients + BODY_QUEUE_SIZE;
 	}
 
 	while (++from < &g_edicts[globals.num_edicts])
@@ -1138,12 +1203,13 @@ static int script_foreach(lua_State* L)
 	luaL_checktype(L, 1, LUA_TTABLE);
 	luaL_checktype(L, 2, LUA_TFUNCTION);
 
-	int n = lua_rawlen(L, 1);
+	lua_len(L, 1);
+	int n = lua_tointeger(L, -1);
 
 	for (int i = 1; i <= n; i++)
 	{
 		lua_pushvalue(L, 2);
-		lua_rawgeti(L, 1, i);
+		lua_geti(L, 1, i);
 		lua_call(L, 1, 0);
 	}
 
@@ -1157,7 +1223,8 @@ static int script_filter(lua_State* L)
 	luaL_checktype(L, 1, LUA_TTABLE);
 	luaL_checktype(L, 2, LUA_TFUNCTION);
 
-	int n = lua_rawlen(L, 1);
+	lua_len(L, 1);
+	int n = lua_tointeger(L, -1);
 
 	int count = 0;
 
@@ -1166,7 +1233,7 @@ static int script_filter(lua_State* L)
 	for (int i = 1; i <= n; i++)
 	{
 		lua_pushvalue(L, 2);
-		lua_rawgeti(L, 1, i);
+		lua_geti(L, 1, i);
 		lua_call(L, 1, 1);
 
 		int keep = lua_toboolean(L, -1);
@@ -1189,7 +1256,8 @@ static int script_pick(lua_State* L)
 {
 	luaL_checktype(L, 1, LUA_TTABLE);
 
-	int n = lua_rawlen(L, 1);
+	lua_len(L, 1);
+	int n = lua_tointeger(L, -1);
 
 	if (n == 0)
 	{
@@ -1197,7 +1265,7 @@ static int script_pick(lua_State* L)
 	}
 	else
 	{
-		lua_rawgeti(L, 1, 1 + irandom(n - 1));
+		lua_geti(L, 1, 1 + irandom(n));
 	}
 
 	return 1;
@@ -1216,7 +1284,7 @@ static int script_values_iterator(lua_State* L)
 	lua_replace(L, lua_upvalueindex(2));
 
 	// Return the element at that index
-	lua_rawgeti(L, lua_upvalueindex(1), i);
+	lua_geti(L, lua_upvalueindex(1), i);
 
 	return 1;
 }
@@ -1312,6 +1380,14 @@ static int script_persistent_set(lua_State* L)
 	return 0;
 }
 
+// __len metamethod for readonly tables
+static int script_readonly_len(lua_State* L)
+{
+	luaL_getmetafield(L, 1, "__index");
+	lua_len(L, -1);
+	return 1;
+}
+
 // __newindex metamethod for read-only tables
 static int script_readonly(lua_State* L)
 {
@@ -1354,6 +1430,8 @@ static void script_table_readonly(lua_State* L, bool recursive = false)
 	lua_newtable(L);
 	lua_rotate(L, -3, -1);
 	lua_setfield(L, -2, "__index");
+	lua_pushcfunction(L, script_readonly_len);
+	lua_setfield(L, -2, "__len");
 	lua_pushcfunction(L, script_readonly);
 	lua_setfield(L, -2, "__newindex");
 	lua_setmetatable(L, -2);
@@ -1422,6 +1500,7 @@ static const luaL_Reg script_vector_metamethods[] =
 	{"__sub", script_vector_sub},
 	{"__mul", script_vector_mul},
 	{"__unm", script_vector_neg},
+	{"__tostring", script_vector_tostring},
 	{"__index", nullptr},
 	{"__newindex", script_readonly},
 	{nullptr, nullptr}
@@ -1430,10 +1509,19 @@ static const luaL_Reg script_vector_metamethods[] =
 // Vector member functions
 static const luaL_Reg script_vector_functions[] =
 {
+	{"components", script_vector_components},
 	{"direction", script_vector_direction},
 	{"distance", script_vector_distance},
 	{"lerp", script_vector_lerp},
-	{"values", script_vector_values},
+	{nullptr, nullptr}
+};
+
+// Entity metamethods
+static const luaL_Reg script_entity_metamethods[] =
+{
+	{"__tostring", script_entity_tostring},
+	{"__index", nullptr},
+	{"__newindex", script_readonly},
 	{nullptr, nullptr}
 };
 
@@ -1446,9 +1534,12 @@ static const luaL_Reg script_entity_functions[] =
 	{"kill", script_entity_kill},
 	{"message", script_entity_message},
 	{"give", script_entity_give},
+	{"heal", script_entity_heal},
+	{"damage", script_entity_damage},
 	{"setnoise", script_entity_setnoise},
 	{"setstring", script_entity_setstring},
-	{"damageable", script_entity_damageable},
+	{"dead", script_entity_dead},
+	{"takedamage", script_entity_takedamage},
 	{"player", script_entity_player},
 	{"monster", script_entity_monster},
 	{"valid", script_entity_valid},
@@ -1458,8 +1549,8 @@ static const luaL_Reg script_entity_functions[] =
 // API functions
 static const luaL_Reg script_functions[] =
 {
-	{"vector", script_vector},
 	{"spawn", script_spawn},
+	{"vector", script_vector},
 	{"find", script_find},
 	{"foreach", script_foreach},
 	{"filter", script_filter},
@@ -1552,10 +1643,9 @@ void script_init()
 
 	// Create metatable for entity objects
 	luaL_newmetatable(L, "script_entity");
+	luaL_setfuncs(L, script_entity_metamethods, 0);
 	luaL_newlib(L, script_entity_functions);
 	lua_setfield(L, -2, "__index");
-	lua_pushcfunction(L, script_readonly);
-	lua_setfield(L, -2, "__newindex");
 	lua_pop(L, 1);
 }
 
@@ -1595,9 +1685,7 @@ void script_load(const char* mapname)
 	lua_setmetatable(L, -2);
 
 	// Attempt to load the script for the current map
-	cvar_t* gamedir = gi.cvar("gamedir", "", CVAR_NOFLAGS);
-
-	if (luaL_loadfile(L, G_Fmt("./{}/scripts/{}.lua", gamedir->string, mapname).data()) != LUA_OK)
+	if (luaL_loadfile(L, G_Fmt("./{}/scripts/{}.lua", gi.cvar("gamedir", "", CVAR_NOFLAGS)->string, mapname).data()) != LUA_OK)
 	{
 		const char* errstr = lua_tostring(L, -1);
 		gi.Com_PrintFmt("Error loading script for map {}: {}\n", mapname, errstr);
@@ -1642,7 +1730,8 @@ void script_load(const char* mapname)
 // self-explanatory. Numbers are not marked as float or integer; their subtype is implied
 // by their string representation (whether or not it contains a decimal point.) Entities are
 // stored as their offset in the entity array, but entities that are invalid by the time
-// the save occurs are saved with an offset of -1.
+// the save occurs are saved with an offset of -1. Vectors are stored as their three components
+// separated by comma.
 
 // During loading, the process is reversed, creating objects from the string representations
 // and adding them to the table in question. Invalid entities will still be invalid; they will
@@ -1669,63 +1758,30 @@ void script_get_variables(std::unordered_map<std::string, std::string>& variable
 	{
 		// luaL_tolstring puts the converted string on the stack as a new object
 		// There's no need to interact with this copy on the stack, but it stops
-		// the key and value from getting mangled
+		// the original variables from getting mangled
 		const char* key = luaL_tolstring(L, -2, nullptr);
+		const char* str = luaL_tolstring(L, -2, nullptr);
+
+		int type = lua_type(L, -3);
 
 		std::string val;
 
-		int type = lua_type(L, -2);
-
 		if (type == LUA_TUSERDATA)
 		{
-			luaL_getmetafield(L, -2, "__name");
-			std::string_view name = lua_tostring(L, -1);
-
-			if (name == "script_vector")
-			{
-				vec3_t* vector = (vec3_t*)lua_touserdata(L, -3);
-
-				val += "vector:";
-
-				val += std::to_string(vector->x);
-				val += ",";
-				val += std::to_string(vector->y);
-				val += ",";
-				val += std::to_string(vector->z);
-			}
-			else if (name == "script_entity")
-			{
-				struct script_ud_ent_t* ud = (script_ud_ent_t*)lua_touserdata(L, -3);
-
-				val += "entity:";
-
-				if (!ud->ent->inuse || ud->ent->spawn_count != ud->spawn_count)
-				{
-					val += "-1";
-				}
-				else
-				{
-					val += std::to_string(ud->ent - g_edicts);
-				}
-			}
-			else
-			{
-				gi.Com_ErrorFmt("script attempting to save unknown uservalue type {}\n", name);
-			}
-
-			lua_pop(L, 1);
+			// Encoding of type and values is handled by __tostring so everything is already here
+			val += str;
 		}
 		else
 		{
+			// Simple values are encoded as type:value
 			val += lua_typename(L, type);
 			val += ':';
-			val += luaL_tolstring(L, -2, nullptr);
-			lua_pop(L, 1);
+			val += str;
 		}
 
 		variables.insert_or_assign(key, val);
 
-		lua_pop(L, 2);
+		lua_pop(L, 3);
 	}
 
 	lua_pop(L, 1);
@@ -1749,13 +1805,15 @@ void script_set_variables(std::unordered_map<std::string, std::string>& variable
 		std::string key = it->first;
 		std::string str = it->second;
 
-		//
+		// Separate the type and value
 		size_t loc = str.find_first_of(':');
 		std::string str_type = str.substr(0, loc);
 		std::string str_val = str.substr(loc + 1);
 
+		// Key has to go on before value for rawset
 		lua_pushstring(L, key.c_str());
 
+		// Handle each type
 		if (str_type == "number")
 		{
 			lua_stringtonumber(L, str_val.c_str());
@@ -1780,7 +1838,8 @@ void script_set_variables(std::unordered_map<std::string, std::string>& variable
 		{
 			int32_t n = std::stoi(str_val);
 
-			if (n < 0)
+			// Check entity for validity; an index of -1 means it was invalid at save time
+			if (n == -1)
 			{
 				// Invalid entities are referenced to worldspawn but with a spawn_count of -1
 				// Since worldspawn's slot is never recycled, let alone over 4 billion times,
@@ -1799,6 +1858,7 @@ void script_set_variables(std::unordered_map<std::string, std::string>& variable
 		}
 		else
 		{
+			// Assume it's a string if it doesn't match any of the other types
 			lua_pushstring(L, str_val.c_str());
 		}
 
@@ -1812,7 +1872,7 @@ void script_set_variables(std::unordered_map<std::string, std::string>& variable
 // script entity
 // =============================================================================
 
-USE(script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
+static USE(script_use) (edict_t* self, edict_t* other, edict_t* activator) -> void
 {
 	// Make sure script has been loaded for this level
 	if (!script_loaded)

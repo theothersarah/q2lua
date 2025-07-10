@@ -140,7 +140,58 @@ void G_PrintActivationMessage(edict_t *ent, edict_t *activator, bool coop_global
 	}
 }
 
+
+
+
 void G_MonsterKilled(edict_t *self);
+
+// Sarah: Moved this to a function so scripts can use it
+void G_Kill(edict_t* ent)
+{
+	if (ent->teammaster)
+	{
+		// PMM - if this entity is part of a chain, cleanly remove it
+		if (ent->flags & FL_TEAMSLAVE)
+		{
+			for (edict_t* master = ent->teammaster; master; master = master->teamchain)
+			{
+				if (master->teamchain == ent)
+				{
+					master->teamchain = ent->teamchain;
+					break;
+				}
+			}
+		}
+		// [Paril-KEX] remove teammaster too
+		else if (ent->flags & FL_TEAMMASTER)
+		{
+			ent->teammaster->flags &= ~FL_TEAMMASTER;
+
+			edict_t* new_master = ent->teammaster->teamchain;
+
+			if (new_master)
+			{
+				new_master->flags |= FL_TEAMMASTER;
+				new_master->flags &= ~FL_TEAMSLAVE;
+
+				for (edict_t* m = new_master; m; m = m->teamchain)
+				{
+					m->teammaster = new_master;
+				}
+			}
+		}
+	}
+
+	// [Paril-KEX] if we killtarget a monster, clean up properly
+	if (ent->svflags & SVF_MONSTER)
+	{
+		if (!ent->deadflag && !(ent->monsterinfo.aiflags & AI_DO_NOT_COUNT) && !(ent->spawnflags & SPAWNFLAG_MONSTER_DEAD))
+			G_MonsterKilled(ent);
+	}
+
+	// PMM
+	G_FreeEdict(ent);
+}
 
 /*
 ==============================
@@ -198,47 +249,7 @@ void G_UseTargets(edict_t *ent, edict_t *activator)
 		t = nullptr;
 		while ((t = G_FindByString<&edict_t::targetname>(t, ent->killtarget)))
 		{
-			if (t->teammaster)
-			{
-				// PMM - if this entity is part of a chain, cleanly remove it
-				if (t->flags & FL_TEAMSLAVE)
-				{
-					for (edict_t *master = t->teammaster; master; master = master->teamchain)
-					{
-						if (master->teamchain == t)
-						{
-							master->teamchain = t->teamchain;
-							break;
-						}
-					}
-				}
-				// [Paril-KEX] remove teammaster too
-				else if (t->flags & FL_TEAMMASTER)
-				{
-					t->teammaster->flags &= ~FL_TEAMMASTER;
-
-					edict_t *new_master = t->teammaster->teamchain;
-
-					if (new_master)
-					{
-						new_master->flags |= FL_TEAMMASTER;
-						new_master->flags &= ~FL_TEAMSLAVE;
-
-						for (edict_t *m = new_master; m; m = m->teamchain)
-							m->teammaster = new_master;
-					}
-				}
-			}
-
-			// [Paril-KEX] if we killtarget a monster, clean up properly
-			if (t->svflags & SVF_MONSTER)
-			{
-				if (!t->deadflag && !(t->monsterinfo.aiflags & AI_DO_NOT_COUNT) && !(t->spawnflags & SPAWNFLAG_MONSTER_DEAD))
-					G_MonsterKilled(t);
-			}
-
-			// PMM
-			G_FreeEdict(t);
+			G_Kill(t);
 
 			if (!ent->inuse)
 			{
@@ -337,6 +348,37 @@ void G_InitEdict(edict_t *e)
 	// PGM
 }
 
+/* Sarah
+=================
+G_Spawn_Reset
+
+Originally, spawning did a linear search from the start of the entity list every time an entity was spawned.
+G_Spawn and G_FreeEdict were adjusted to use a bookmark system to limit the number of entities searched
+when spawning new entities.
+
+It keeps the position of the last entity that was spawned and searches from there when the next entity is
+spawned. When an entity is freed, it keeps track of what index it was in and the time it was freed, and
+this is used when spawning an entity later to determine where the search should start from. If the entity
+was freed more than 500 milliseconds ago, it just uses that slot immediately without searching.
+
+During the initial spawning of entities at map start, no searching needs to be done at all. It will either
+use the slot of an entity that chose to free itself during spawning, or it will expand the entity list.
+=================
+*/
+
+static uint32_t spawn_pos;
+
+static bool despawn_valid;
+static gtime_t despawn_time;
+static uint32_t despawn_pos;
+
+// Sarah: Reset spawn bookmarks
+void G_Spawn_Reset()
+{
+	spawn_pos = game.maxclients;
+	despawn_valid = false;
+}
+
 /*
 =================
 G_Spawn
@@ -350,22 +392,51 @@ angles and bad trails.
 */
 edict_t *G_Spawn()
 {
-	uint32_t i;
 	edict_t *e;
 
-	e = &g_edicts[game.maxclients + 1];
-	for (i = game.maxclients + 1; i < globals.num_edicts; i++, e++)
+	//
+	bool early = (level.time < 2_sec);
+
+	if (despawn_valid && (early || level.time - despawn_time > 500_ms))
 	{
-		// the first couple seconds of server time can involve a lot of
-		// freeing and allocating, so relax the replacement policy
-		if (!e->inuse && (e->freetime < 2_sec || level.time - e->freetime > 500_ms))
+		despawn_valid = false;
+
+		if (spawn_pos > despawn_pos)
 		{
-			G_InitEdict(e);
-			return e;
+			spawn_pos = despawn_pos;
+		}
+
+		// We know the index of a valid slot so we may as well use it right now
+		//gi.Com_PrintFmt("G_Spawn immediately using slot {}\n", despawn_pos);
+		e = &g_edicts[despawn_pos];
+		G_InitEdict(e);
+		return e;
+	}
+	else
+	{
+		spawn_pos++;
+	}
+	//gi.Com_PrintFmt("G_Spawn resuming from slot {}\n", spawn_pos);
+	for (e = &g_edicts[spawn_pos]; spawn_pos < globals.num_edicts; spawn_pos++, e++)
+	{
+		if (!e->inuse)
+		{
+			if (early || level.time - e->freetime > 500_ms)
+			{
+				//gi.Com_PrintFmt("G_Spawn using slot {}\n", spawn_pos);
+				G_InitEdict(e);
+				return e;
+			}
+			else if (!despawn_valid)
+			{
+				despawn_pos = spawn_pos;
+				despawn_time = e->freetime;
+				despawn_valid = true;
+			}
 		}
 	}
 
-	if (i == game.maxentities)
+	if (spawn_pos == game.maxentities)
 		gi.Com_Error("ED_Alloc: no free edicts");
 
 	globals.num_edicts++;
@@ -406,6 +477,28 @@ THINK(G_FreeEdict) (edict_t *ed) -> void
 	ed->inuse = false;
 	ed->spawn_count = id;
 	ed->sv.init = false;
+
+	// Sarah: Adjust despawn bookmarks and timestamps
+	uint32_t pos = ed - g_edicts;
+
+	//gi.Com_PrintFmt("G_FreeEdict freeing slot {}\n", pos);
+
+	if (despawn_valid)
+	{
+		// Push back the despawn bookmark if the slot is earlier than it in the array
+		if (pos < despawn_pos)
+		{
+			despawn_pos = pos;
+			despawn_time = level.time;
+		}
+	}
+	else
+	{
+		// Set a bookmark
+		despawn_pos = pos;
+		despawn_time = level.time;
+		despawn_valid = true;
+	}
 }
 
 BoxEdictsResult_t G_TouchTriggers_BoxFilter(edict_t *hit, void *)

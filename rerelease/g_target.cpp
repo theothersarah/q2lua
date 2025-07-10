@@ -561,8 +561,13 @@ USE(use_target_spawner) (edict_t *self, edict_t *other, edict_t *activator) -> v
 	gi.linkentity(ent);
 
 	KillBox(ent, false);
+
+	// Sarah: check speed here so a script can change it
 	if (self->speed)
-		ent->velocity = self->movedir;
+	{
+		G_SetMovedir(self->s.angles, ent->velocity);
+		ent->velocity *= self->speed;
+	}
 
 	ent->s.renderfx |= RF_IR_VISIBLE; // PGM
 }
@@ -571,11 +576,8 @@ void SP_target_spawner(edict_t *self)
 {
 	self->use = use_target_spawner;
 	self->svflags = SVF_NOCLIENT;
-	if (self->speed)
-	{
-		G_SetMovedir(self->s.angles, self->movedir);
-		self->movedir *= self->speed;
-	}
+
+	// Sarah: removed speed check
 }
 
 //==========================================================
@@ -590,9 +592,6 @@ speed	default is 1000
 constexpr spawnflags_t SPAWNFLAG_BLASTER_NOTRAIL = 1_spawnflag;
 constexpr spawnflags_t SPAWNFLAG_BLASTER_NOEFFECTS = 2_spawnflag;
 
-// Sarah: New spawnflags
-constexpr spawnflags_t SPAWNFLAG_BLASTER_SILENT = 4_spawnflag;
-
 USE(use_target_blaster) (edict_t *self, edict_t *other, edict_t *activator) -> void
 {
 	effects_t effect;
@@ -604,66 +603,27 @@ USE(use_target_blaster) (edict_t *self, edict_t *other, edict_t *activator) -> v
 	else
 		effect = EF_BLASTER;
 
-	// Sarah: shoot at target if it's still valid
-	if (self->enemy)
-	{
-		if (self->count == self->enemy->spawn_count)
-		{
-			vec3_t dir = self->enemy->s.origin - self->s.origin;
-			dir.normalize();
+	// Sarah: Calculate direction from angles each time it fires, so a script can change angles to aim it
+	G_SetMovedir(self->s.angles, self->movedir);
 
-			fire_blaster(self, self->s.origin, dir, self->dmg, (int)self->speed, effect, MOD_TARGET_BLASTER);
-		}
-		else
-		{
-			self->enemy = nullptr;
-		}
-	}
-	else
-	{
-		fire_blaster(self, self->s.origin, self->movedir, self->dmg, (int)self->speed, effect, MOD_TARGET_BLASTER);
-	}
-
-	// Sarah: fire silently if spawnflag is set
-	if (!self->spawnflags.has(SPAWNFLAG_BLASTER_SILENT))
-	{
-		gi.sound(self, CHAN_VOICE, self->noise_index, 1, ATTN_NORM, 0);
-	}
-}
-
-// Sarah: find target
-THINK(blaster_find_target) (edict_t* self) -> void
-{
-	edict_t* ent = G_FindByString<&edict_t::targetname>(nullptr, self->target);
-
-	if (!ent)
-	{
-		gi.Com_PrintFmt("{}: target {} not found\n", *self, self->target);
-	}
-	else
-	{
-		self->count = ent->spawn_count;
-		self->enemy = ent;
-	}
+	fire_blaster(self, self->s.origin, self->movedir, self->dmg, (int)self->speed, effect, MOD_TARGET_BLASTER);
+	gi.sound(self, CHAN_VOICE, self->noise_index, 1, ATTN_NORM, 0);
 }
 
 void SP_target_blaster(edict_t *self)
 {
 	self->use = use_target_blaster;
-	G_SetMovedir(self->s.angles, self->movedir);
-	self->noise_index = gi.soundindex("weapons/laser2.wav");
+
+	// Sarah: sound can now be configured
+	if (!st.noise)
+	{
+		self->noise_index = gi.soundindex("weapons/laser2.wav");
+	}
 
 	if (!self->dmg)
 		self->dmg = 15;
 	if (!self->speed)
 		self->speed = 1000;
-
-	// Sarah: if a target is given, wait until next frame to find it
-	if (self->target)
-	{
-		self->think = blaster_find_target;
-		self->nextthink = level.time + FRAME_TIME_S;
-	}
 
 	self->svflags = SVF_NOCLIENT;
 }

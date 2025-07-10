@@ -379,8 +379,10 @@ void InitGame()
 	game.max_lag_origins = 20 * (0.1f / gi.frame_time_s);
 	game.lag_origins = (vec3_t *) gi.TagMalloc(game.maxclients * sizeof(vec3_t) * game.max_lag_origins, TAG_GAME);
 
-	// Sarah
+	// Sarah: Initialize new things
 	script_init();
+	ED_CreateSpawnlist();
+	ED_CreateParselist();
 }
 
 //===================================================================

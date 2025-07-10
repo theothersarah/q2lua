@@ -2446,6 +2446,11 @@ void ReadGameJson(const char *jsonString)
 {
 	gi.FreeTags(TAG_GAME);
 
+	// Sarah: These needs to be done here again because they get blown away by freeing TAG_GAME
+	script_init();
+	ED_CreateSpawnlist();
+	ED_CreateParselist();
+
 	Json::Value json = parseJson(jsonString);
 
 	uint32_t max_entities = game.maxentities;
@@ -2477,9 +2482,6 @@ void ReadGameJson(const char *jsonString)
 		read_save_struct_json(v, &game.clients[i++], &gclient_t_savestruct);
 		json_pop_stack();
 	}
-
-	// Sarah: This needs to be done here again because it gets blown away by freeing TAG_GAME
-	script_init();
 
 	// Sarah: read persistent variables
 	std::unordered_map<std::string, std::string> persistent_variables;
@@ -2564,6 +2566,9 @@ char *WriteLevelJson(bool transition, size_t *out_size)
 // not store or modify it.
 void ReadLevelJson(const char *jsonString)
 {
+	// Sarah: Reset bookmarks for spawning
+	G_Spawn_Reset();
+
 	// free any dynamic memory allocated by loading the level
 	// base state
 	gi.FreeTags(TAG_LEVEL);

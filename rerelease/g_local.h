@@ -2062,11 +2062,19 @@ edict_t *G_FindByString(edict_t *from, const std::string_view &value)
 
 edict_t *findradius(edict_t *from, const vec3_t &org, float rad);
 edict_t *G_PickTarget(const char *targetname);
+
+// Sarah: added
+void G_Kill(edict_t* ent);
+
 void	 G_UseTargets(edict_t *ent, edict_t *activator);
 void	 G_PrintActivationMessage(edict_t *ent, edict_t *activator, bool coop_global);
 void	 G_SetMovedir(vec3_t &angles, vec3_t &movedir);
 
 void	 G_InitEdict(edict_t *e);
+
+// Sarah: added
+void G_Spawn_Reset();
+
 edict_t *G_Spawn();
 void	 G_FreeEdict(edict_t *e);
 
@@ -2085,8 +2093,16 @@ void G_PlayerNotifyGoal(edict_t *player);
 //
 // g_spawn.c
 //
+
+// Sarah: Added prototype for spawnlist creation
+void ED_CreateSpawnlist();
+void ED_CreateParselist();
+
 void  ED_CallSpawn(edict_t *ent);
 char *ED_NewString(char *string);
+
+// Sarah: prototype added, used by script
+void ED_ParseField(const char* key, const char* value, edict_t* ent);
 
 //
 // g_target.c

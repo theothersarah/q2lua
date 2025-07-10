@@ -3,9 +3,10 @@
 
 #include "g_local.h"
 
+// Sarah: changed name to classname for consistency
 struct spawn_t
 {
-	const char *name;
+	const char *classname;
 	void (*spawn)(edict_t *ent);
 };
 
@@ -224,7 +225,9 @@ void SP_path_track(edict_t* self);
 void SP_func_mover(edict_t* self);
 
 // clang-format off
-static const std::initializer_list<spawn_t> spawns = {
+
+// Sarah: change to plain array so it can be accessed by index
+static const struct spawn_t spawns[] = {
 	{ "info_player_start", SP_info_player_start },
 	{ "info_player_deathmatch", SP_info_player_deathmatch },
 	{ "info_player_coop", SP_info_player_coop },
@@ -449,6 +452,73 @@ static const std::initializer_list<spawn_t> spawns = {
 };
 // clang-format on
 
+// Sarah: sort the spawn and item lists so they can be binary searched later
+struct spawnlist_t
+{
+	const char* classname;
+	bool isItem;
+	int index;
+};
+
+static struct spawnlist_t* spawnlist;
+static size_t spawnlist_count = 0;
+
+// Compare function for qsort for sorting the spawn function list by case-insensitive strcmp order
+static int ED_SpawnlistSort(const void* pa, const void* pb)
+{
+	const char* str1 = ((struct spawnlist_t*)pa)->classname;
+	const char* str2 = ((struct spawnlist_t*)pb)->classname;
+
+	return Q_strcasecmp(str1, str2);
+}
+
+// Sort the spawn array
+void ED_CreateSpawnlist()
+{
+	// Count spawn functions
+	size_t numSpawns = sizeof(spawns) / sizeof(struct spawn_t);
+
+	// Count items
+	size_t numItems = 0;
+
+	for (int i = 0; i < IT_TOTAL; i++)
+	{
+		if (itemlist[i].classname != nullptr)
+		{
+			numItems++;
+		}
+	}
+
+	// Allocate memory
+	spawnlist_count = numSpawns + numItems;
+
+	spawnlist = (struct spawnlist_t*)gi.TagMalloc(spawnlist_count * sizeof(struct spawnlist_t), TAG_GAME);
+
+	// Populate spawn list with regular spawns
+	for (int i = 0; i < numSpawns; i++)
+	{
+		spawnlist[i].classname = spawns[i].classname;
+		spawnlist[i].isItem = false;
+		spawnlist[i].index = i;
+	}
+
+	// Populate the spawn list with items
+	for (int i = 0, idx = numSpawns; i < IT_TOTAL; i++)
+	{
+		if (itemlist[i].classname != nullptr)
+		{
+			spawnlist[idx].classname = itemlist[i].classname;
+			spawnlist[idx].isItem = true;
+			spawnlist[idx].index = i;
+
+			idx++;
+		}
+	}
+
+	// Sort the regular spawn list
+	qsort(spawnlist, spawnlist_count, sizeof(struct spawnlist_t), ED_SpawnlistSort);
+}
+
 /*
 ===============
 ED_CallSpawn
@@ -456,11 +526,18 @@ ED_CallSpawn
 Finds the spawn function for the entity and calls it
 ===============
 */
+
+// Sarah: compare function for bsearch on spawnlist
+static int ED_SpawnlistSearch(const void* pa, const void* pb)
+{
+	const char* str1 = ((const char*)pa);
+	const char* str2 = ((struct spawnlist_t*)pb)->classname;
+
+	return Q_strcasecmp(str1, str2);
+}
+
 void ED_CallSpawn(edict_t *ent)
 {
-	gitem_t *item;
-	int		 i;
-
 	if (!ent->classname)
 	{
 		gi.Com_Print("ED_CallSpawn: nullptr classname\n");
@@ -476,24 +553,19 @@ void ED_CallSpawn(edict_t *ent)
 
 	ent->sv.init = false;
 
-	// FIXME - PMM classnames hack
-	if (!strcmp(ent->classname, "weapon_nailgun"))
-		ent->classname = GetItemByIndex(IT_WEAPON_ETF_RIFLE)->classname;
-	if (!strcmp(ent->classname, "ammo_nails"))
-		ent->classname = GetItemByIndex(IT_AMMO_FLECHETTES)->classname;
-	if (!strcmp(ent->classname, "weapon_heatbeam"))
-		ent->classname = GetItemByIndex(IT_WEAPON_PLASMABEAM)->classname;
-	// pmm
+	// Sarah - removed Ground Zero classname hacks. These can be fixed with patched entity files
 
-	// check item spawn functions
-	for (i = 0, item = itemlist; i < IT_TOTAL; i++, item++)
+	// Sarah: do a binary search on the entity list instead of a linear one
+	struct spawnlist_t* found = (struct spawnlist_t*)bsearch(ent->classname, spawnlist, spawnlist_count, sizeof(struct spawnlist_t), ED_SpawnlistSearch);
+
+	if (found != nullptr)
 	{
-		if (!item->classname)
-			continue;
-		if (!strcmp(item->classname, ent->classname))
+		ent->classname = found->classname;
+
+		if (found->isItem)
 		{
-			// found it
-			// before spawning, pick random item replacement
+			gitem_t* item = &itemlist[found->index];
+
 			if (g_dm_random_items->integer)
 			{
 				ent->item = item;
@@ -507,22 +579,13 @@ void ED_CallSpawn(edict_t *ent)
 			}
 
 			SpawnItem(ent, item);
-			return;
 		}
-	}
-
-	// check normal spawn functions
-	for (auto &s : spawns)
-	{
-		if (!strcmp(s.name, ent->classname))
-		{ // found it
-			s.spawn(ent);
-
-			// Paril: swap classname with stored constant if we didn't change it
-			if (strcmp(ent->classname, s.name) == 0)
-				ent->classname = s.name;
-			return;
+		else
+		{
+			spawns[found->index].spawn(ent);
 		}
+
+		return;
 	}
 
 	gi.Com_PrintFmt("{} doesn't have a spawn function\n", *ent);
@@ -682,7 +745,8 @@ static int32_t ED_LoadColor(const char *value)
 #define FIELD_AUTO_NAMED(n, x) \
 	{ n, AUTO_LOADER_FUNC(x) }
 
-static const std::initializer_list<field_t> entity_fields = {
+// Sarah: turned into a normal array
+static const struct field_t entity_fields[] = {
 	FIELD_AUTO(classname),
 	FIELD_AUTO(model),
 	FIELD_AUTO(spawnflags),
@@ -765,8 +829,17 @@ static const std::initializer_list<field_t> entity_fields = {
 	FIELD_AUTO(maxs),
 
 	// [Paril-KEX] customizable bmodel animations
-	FIELD_AUTO_NAMED("bmodel_anim_start", bmodel_anim.start),
-	FIELD_AUTO_NAMED("bmodel_anim_end", bmodel_anim.end),
+	// Sarah: Added enabled flag to parse functions
+	{ "bmodel_anim_start", [](edict_t* e, const char* value) {
+		e->bmodel_anim.start = atoi(value);
+		e->bmodel_anim.enabled = true;
+	} },
+	{ "bmodel_anim_end", [](edict_t* e, const char* value) {
+		e->bmodel_anim.end = atoi(value);
+		e->bmodel_anim.enabled = true;
+	} },
+	//FIELD_AUTO_NAMED("bmodel_anim_start", bmodel_anim.start),
+	//FIELD_AUTO_NAMED("bmodel_anim_end", bmodel_anim.end),
 	FIELD_AUTO_NAMED("bmodel_anim_style", bmodel_anim.style),
 	FIELD_AUTO_NAMED("bmodel_anim_speed", bmodel_anim.speed),
 	FIELD_AUTO_NAMED("bmodel_anim_nowrap", bmodel_anim.nowrap),
@@ -794,7 +867,7 @@ static const std::initializer_list<field_t> entity_fields = {
 
 	FIELD_AUTO_NAMED("monster_slots", monsterinfo.monster_slots),
 
-	// Sarah
+	// Sarah: added fields
 	FIELD_AUTO(script_function),
 	FIELD_AUTO(script_arg),
 };
@@ -814,7 +887,9 @@ struct temp_field_t
 
 // temp spawn vars -- only valid when the spawn function is called
 // (copied to `st`)
-static const std::initializer_list<temp_field_t> temp_fields = {
+
+// Sarah: Turned into a normal array
+static const struct temp_field_t temp_fields[] = {
 	FIELD_AUTO(lip),
 	FIELD_AUTO(distance),
 	FIELD_AUTO(height),
@@ -866,6 +941,58 @@ static const std::initializer_list<temp_field_t> temp_fields = {
 };
 // clang-format on
 
+// Sarah: Create list for entity key parse functions
+struct parselist_t
+{
+	const char* name;
+	bool isTemp;
+	int index;
+};
+
+static struct parselist_t* parselist;
+static size_t parselist_count = 0;
+
+// Compare function for qsort for sorting the spawn function list by case-insensitive strcmp order
+static int ED_ParselistSort(const void* pa, const void* pb)
+{
+	const char* str1 = ((struct parselist_t*)pa)->name;
+	const char* str2 = ((struct parselist_t*)pb)->name;
+
+	return Q_strcasecmp(str1, str2);
+}
+
+// Sort the spawn array
+void ED_CreateParselist()
+{
+	// Count lists
+	size_t numFields = sizeof(entity_fields) / sizeof(struct field_t);
+	size_t numTemp = sizeof(temp_fields) / sizeof(struct temp_field_t);
+
+	// Allocate memory
+	parselist_count = numFields + numTemp;
+
+	parselist = (struct parselist_t*)gi.TagMalloc(parselist_count * sizeof(struct parselist_t), TAG_GAME);
+
+	// Populate spawn list with regular spawns
+	for (int i = 0; i < numFields; i++)
+	{
+		parselist[i].name = entity_fields[i].name;
+		parselist[i].isTemp = false;
+		parselist[i].index = i;
+	}
+
+	// Populate the spawn list with items
+	for (int i = 0; i < numTemp; i++)
+	{
+		parselist[numFields + i].name = temp_fields[i].name;
+		parselist[numFields + i].isTemp = true;
+		parselist[numFields + i].index = i;
+	}
+
+	// Sort the regular spawn list
+	qsort(parselist, parselist_count, sizeof(struct parselist_t), ED_ParselistSort);
+}
+
 /*
 ===============
 ED_ParseField
@@ -874,38 +1001,39 @@ Takes a key/value pair and sets the binary values
 in an edict
 ===============
 */
+
+// Sarah: compare function for bsearch on parse
+static int ED_ParselistSearch(const void* pa, const void* pb)
+{
+	const char* str1 = ((const char*)pa);
+	const char* str2 = ((struct parselist_t*)pb)->name;
+
+	return Q_strcasecmp(str1, str2);
+}
+
 void ED_ParseField(const char *key, const char *value, edict_t *ent)
 {
-	// check st first
-	for (auto &f : temp_fields)
+	// Sarah: Use bsearch for finding entity key parse function
+	struct parselist_t* found = (struct parselist_t*)bsearch(key, parselist, parselist_count, sizeof(struct parselist_t), ED_ParselistSearch);
+
+	if (found != nullptr)
 	{
-		if (Q_strcasecmp(f.name, key))
-			continue;
+		st.keys_specified.emplace(temp_fields[found->index].name);
 
-		st.keys_specified.emplace(f.name);
-
-		// found it
-		if (f.load_func)
-			f.load_func(&st, value);
-		
-		return;
-	}
-
-	// now entity
-	for (auto &f : entity_fields)
-	{
-		if (Q_strcasecmp(f.name, key))
-			continue;
-
-		st.keys_specified.emplace(f.name);
-
-		// [Paril-KEX]
-		if (!strcmp(f.name, "bmodel_anim_start") || !strcmp(f.name, "bmodel_anim_end"))
-			ent->bmodel_anim.enabled = true;
-
-		// found it
-		if (f.load_func)
-			f.load_func(ent, value);
+		if (found->isTemp)
+		{
+			if (temp_fields[found->index].load_func)
+			{
+				temp_fields[found->index].load_func(&st, value);
+			}
+		}
+		else
+		{
+			if (entity_fields[found->index].load_func)
+			{
+				entity_fields[found->index].load_func(ent, value);
+			}
+		}
 
 		return;
 	}
@@ -1160,6 +1288,9 @@ parsing textual entity definitions out of an ent file.
 */
 void SpawnEntities(const char *mapname, const char *entities, const char *spawnpoint)
 {
+	// Sarah: Reset bookmarks for spawning
+	G_Spawn_Reset();
+
 	// clear cached indices
 	cached_soundindex::clear_all();
 	cached_modelindex::clear_all();
@@ -1211,6 +1342,29 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 	// reserve some spots for dead player bodies for coop / deathmatch
 	InitBodyQue();
 
+	// Sarah: check for entity patch file and load it if found
+	char* ents = nullptr;
+
+	FILE* file = fopen(G_Fmt("./{}/maps/{}.ent", gi.cvar("gamedir", "", CVAR_NOFLAGS)->string, mapname).data(), "r");
+
+	if (file != nullptr)
+	{
+		fseek(file, 0, SEEK_END);
+		size_t len = ftell(file);
+		fseek(file, 0, SEEK_SET);
+
+		ents = (char*)gi.TagMalloc(len + 1, TAG_LEVEL);
+
+		fread(ents, sizeof(char), len, file);
+		ents[len] = '\0';
+
+		fclose(file);
+
+		entities = ents;
+
+		gi.Com_PrintFmt("Loaded entity patch for map {}\n", mapname);
+	}
+
 	// parse ents
 	while (1)
 	{
@@ -1251,6 +1405,12 @@ void SpawnEntities(const char *mapname, const char *entities, const char *spawnp
 		ED_CallSpawn(ent);
 
 		ent->s.renderfx |= RF_IR_VISIBLE; // PGM
+	}
+
+	// Sarah: done with ents
+	if (ents != nullptr)
+	{
+		gi.TagFree(ents);
 	}
 
 	gi.Com_PrintFmt("{} entities inhibited\n", inhibit);
